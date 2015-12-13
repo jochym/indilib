@@ -129,8 +129,11 @@ set (indidriver_SRCS
         ${CMAKE_SOURCE_DIR}/libs/indibase/indidome.cpp
         ${CMAKE_SOURCE_DIR}/libs/indibase/indigps.cpp
         ${CMAKE_SOURCE_DIR}/libs/indibase/indiweather.cpp
+        ${CMAKE_SOURCE_DIR}/libs/indibase/indidustcapinterface.cpp
+        ${CMAKE_SOURCE_DIR}/libs/indibase/indilightboxinterface.cpp
         ${CMAKE_SOURCE_DIR}/libs/indibase/indilogger.cpp
         ${CMAKE_SOURCE_DIR}/libs/indibase/indicontroller.cpp
+
     )
 
 set (lx_SRCS
@@ -467,6 +470,16 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 install(FILES ${CMAKE_SOURCE_DIR}/drivers/focuser/99-perfectstar.rules DESTINATION ${UDEVRULES_INSTALL_DIR})
 endif (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 
+################ JMI Smart Focus Focuser ################
+
+set(smartfocus_SRCS
+        ${CMAKE_SOURCE_DIR}/drivers/focuser/smartfocus.cpp
+   )
+
+add_executable(indi_smartfocus_focus ${smartfocus_SRCS})
+target_link_libraries(indi_smartfocus_focus indidriver)
+install(TARGETS indi_smartfocus_focus RUNTIME DESTINATION bin )
+
 ################ Optec TCF-S ################
 
 set(tcfs_SRCS
@@ -780,6 +793,7 @@ ${CMAKE_SOURCE_DIR}/libs/indibase/indifocuserinterface.h  ${CMAKE_SOURCE_DIR}/li
 ${CMAKE_SOURCE_DIR}/libs/indibase/inditelescope.h ${CMAKE_SOURCE_DIR}/libs/indibase/baseclient.h ${CMAKE_SOURCE_DIR}/libs/indibase/indiguiderinterface.h
 ${CMAKE_SOURCE_DIR}/libs/indibase/indifilterinterface.h ${CMAKE_SOURCE_DIR}/libs/indibase/indiproperty.h
 ${CMAKE_SOURCE_DIR}/libs/indibase/indidome.h ${CMAKE_SOURCE_DIR}/libs/indibase/indigps.h
+${CMAKE_SOURCE_DIR}/libs/indibase/indilightboxinterface.h ${CMAKE_SOURCE_DIR}/libs/indibase/indidustcapinterface.h
 ${CMAKE_SOURCE_DIR}/libs/indibase/indiweather.h ${CMAKE_SOURCE_DIR}/libs/indicom.h ${CMAKE_SOURCE_DIR}/libs/indibase/indiusbdevice.h
 ${CMAKE_SOURCE_DIR}/libs/indibase/indilogger.h ${CMAKE_SOURCE_DIR}/libs/indibase/indicontroller.h ${CMAKE_SOURCE_DIR}/libs/indibase/hidapi.h
 ${CMAKE_SOURCE_DIR}/libs/webcam/ccvt.h ${CMAKE_SOURCE_DIR}/libs/webcam/ccvt_types.h

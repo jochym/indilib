@@ -22,17 +22,16 @@
   file called LICENSE.
 *******************************************************************************/
 
-#ifndef GPSSIMULATOR_H
-#define GPSSIMULATOR_H
+#ifndef FLIPFLAT_H
+#define FLIPFLAT_H
 
 #include "defaultdevice.h"
+#include "indilightboxinterface.h"
+#include "indidustcapinterface.h"
 
-class FlipFlat : public INDI::DefaultDevice
+class FlipFlat : public INDI::DefaultDevice, public INDI::LightBoxInterface, public INDI::DustCapInterface
 {
     public:
-
-    enum { OPEN_COVER, CLOSE_COVER };
-    enum { TURN_ON_LIGHT, TURN_OFF_LIGHT };
 
     FlipFlat();
     virtual ~FlipFlat();
@@ -44,6 +43,7 @@ class FlipFlat : public INDI::DefaultDevice
     virtual bool ISNewText (const char *dev, const char *name, char *texts[], char *names[], int n);
     virtual bool ISNewSwitch (const char *dev, const char *name, ISState *states, char *names[], int n);
     virtual bool ISNewNumber (const char *dev, const char *name, double values[], char *names[], int n);
+    virtual bool ISSnoopDevice (XMLEle *root);
 
     protected:
 
@@ -52,35 +52,28 @@ class FlipFlat : public INDI::DefaultDevice
     bool Disconnect();
     const char *getDefaultName();
 
+    virtual bool saveConfigItems(FILE *fp);
     void TimerHit();
 
+    // From Dust Cap
+    virtual IPState ParkCap();
+    virtual IPState UnParkCap();
+
+    // From Light Box
+    virtual bool SetLightBoxBrightness(uint16_t value);
+    virtual bool EnableLightBox(bool enable);
 
 private:
 
     bool getStartupData();
     bool ping();
-    bool controlCover(int cmd);
-    bool controlLight(int cmd);
     bool getStatus();
     bool getFirmwareVersion();
     bool getBrightness();
-    bool setBrightness(int value);
 
     // Device physical port
     ITextVectorProperty PortTP;
     IText PortT[1];
-
-    // Open/Close cover
-    ISwitchVectorProperty CoverSP;
-    ISwitch CoverS[2];
-
-    // Turn on/off light
-    ISwitchVectorProperty LightSP;
-    ISwitch LightS[2];
-
-    // Light Intensity
-    INumberVectorProperty LightIntensityNP;
-    INumber LightIntensityN[1];
 
     // Status
     ITextVectorProperty StatusTP;

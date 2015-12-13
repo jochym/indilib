@@ -75,10 +75,10 @@ void ISNewBLOB (const char *dev, const char *name, int sizes[], int blobsizes[],
 }
 void ISSnoopDevice (XMLEle *root)
 {
-    INDI_UNUSED(root);
+    flipflat->ISSnoopDevice(root);
 }
 
-FlipFlat::FlipFlat()
+FlipFlat::FlipFlat() : LightBoxInterface(this, true)
 {
     setVersion(1,0);
     PortFD=-1;
@@ -97,21 +97,7 @@ bool FlipFlat::initProperties()
 
     // Device port
     IUFillText(&PortT[0],"PORT","Port","/dev/ttyUSB0");
-    IUFillTextVector(&PortTP,PortT,1,getDeviceName(),"DEVICE_PORT","Ports",OPTIONS_TAB,IP_RW,60,IPS_IDLE);
-
-    // Open/Close cover
-    IUFillSwitch(&CoverS[0], "PARK", "Park", ISS_OFF);
-    IUFillSwitch(&CoverS[1], "UNPARK", "Unpark", ISS_OFF);
-    IUFillSwitchVector(&CoverSP, CoverS, 2, getDeviceName(), "CAP_PARK", "Dust Cover", MAIN_CONTROL_TAB, IP_RW, ISR_1OFMANY, 0, IPS_IDLE);
-
-    // Turn on/off light
-    IUFillSwitch(&LightS[0], "FLAT_LIGHT_ON", "On", ISS_OFF);
-    IUFillSwitch(&LightS[1], "FLAT_LIGHT_OFF", "Off", ISS_OFF);
-    IUFillSwitchVector(&LightSP, LightS, 2, getDeviceName(), "FLAT_LIGHT_CONTROL", "Flat Light", MAIN_CONTROL_TAB, IP_RW, ISR_1OFMANY, 0, IPS_IDLE);
-
-    // Light Intensity
-    IUFillNumber(&LightIntensityN[0], "FLAT_LIGHT_INTENSITY_VALUE", "Value", "%.f", 0, 255, 10, 0);
-    IUFillNumberVector(&LightIntensityNP, LightIntensityN, 1, getDeviceName(), "FLAT_LIGHT_INTENSITY", "Brightness", MAIN_CONTROL_TAB, IP_RW, 0, IPS_IDLE);
+    IUFillTextVector(&PortTP,PortT,1,getDeviceName(),"DEVICE_PORT","Ports",OPTIONS_TAB,IP_RW,60,IPS_IDLE);   
 
     // Status
     IUFillText(&StatusT[0],"Cover","",NULL);
@@ -123,7 +109,15 @@ bool FlipFlat::initProperties()
     IUFillText(&FirmwareT[0],"Version","",NULL);
     IUFillTextVector(&FirmwareTP,FirmwareT,1,getDeviceName(),"Firmware","",MAIN_CONTROL_TAB,IP_RO,60,IPS_IDLE);
 
-    setDriverInterface(AUX_INTERFACE);
+    initDustCapProperties(getDeviceName(), MAIN_CONTROL_TAB);
+    initLightBoxProperties(getDeviceName(), MAIN_CONTROL_TAB);
+
+    LightIntensityN[0].min  = 0;
+    LightIntensityN[0].max  = 255;
+    LightIntensityN[0].step = 10;
+
+    // Set DUSTCAP_INTEFACE later on connect after we verify whether it's flip-flat (dust cover + light) or just flip-man (light only)
+    setDriverInterface(AUX_INTERFACE | LIGHTBOX_INTERFACE);
 
     addDebugControl();
 
@@ -145,23 +139,26 @@ bool FlipFlat::updateProperties()
     if (isConnected())
     {
         if (isFlipFlat)
-            defineSwitch(&CoverSP);
+            defineSwitch(&ParkCapSP);
         defineSwitch(&LightSP);
         defineNumber(&LightIntensityNP);
         defineText(&StatusTP);
-        defineText(&FirmwareTP);
+        defineText(&FirmwareTP);        
+
+        updateLightBoxProperties();
 
         getStartupData();
     }
     else
     {
         if (isFlipFlat)
-            deleteProperty(CoverSP.name);
+            deleteProperty(ParkCapSP.name);
         deleteProperty(LightSP.name);
         deleteProperty(LightIntensityNP.name);
         deleteProperty(StatusTP.name);
         deleteProperty(FirmwareTP.name);
 
+        updateLightBoxProperties();
     }
 
     return true;
@@ -224,43 +221,26 @@ bool FlipFlat::Disconnect()
 
 bool FlipFlat::ISNewNumber (const char *dev, const char *name, double values[], char *names[], int n)
 {
-    if(strcmp(dev,getDeviceName())==0)
-    {
-        if (!strcmp(LightIntensityNP.name, name))
-        {
-            double prevValue = LightIntensityN[0].value;
-            IUUpdateNumber(&LightIntensityNP, values, names, n);
-
-            bool rc = setBrightness(LightIntensityN[0].value);
-            if (rc)
-                LightIntensityNP.s = IPS_OK;
-            else
-            {
-                LightIntensityN[0].value = prevValue;
-                LightIntensityNP.s = IPS_ALERT;
-            }
-
-            IDSetNumber(&LightIntensityNP, NULL);
-
-            return true;
-        }
-    }
+    if (processLightBoxNumber(dev, name, values, names, n))
+        return true;
 
     return INDI::DefaultDevice::ISNewNumber(dev, name, values, names, n);
-
 }
 
 bool FlipFlat::ISNewText (const char *dev, const char *name, char *texts[], char *names[], int n)
 {
     if(strcmp(dev,getDeviceName())==0)
     {
+        if (processLightBoxText(dev, name, texts, names, n))
+            return true;
+
         if (!strcmp(PortTP.name, name))
         {
             IUUpdateText(&PortTP, texts, names, n);
             PortTP.s = IPS_OK;
             IDSetText(&PortTP, NULL);
             return true;
-        }
+        }        
     }
 
     return INDI::DefaultDevice::ISNewText(dev, name, texts, names, n);
@@ -270,46 +250,32 @@ bool FlipFlat::ISNewSwitch (const char *dev, const char *name, ISState *states, 
 {
     if(strcmp(dev,getDeviceName())==0)
     {
-        // Cover
-        if (!strcmp(CoverSP.name, name))
-        {
-            IUUpdateSwitch(&CoverSP, states, names, n);
-            bool rc = controlCover(CoverS[0].s == ISS_ON ? CLOSE_COVER : OPEN_COVER);
-            IUResetSwitch(&CoverSP);
-
-            CoverSP.s = rc ? IPS_BUSY : IPS_ALERT;
-
-            IDSetSwitch(&CoverSP, NULL);
-
+        if (processDustCapSwitch(dev, name, states, names, n))
             return true;
-        }
 
-        // Light
-        if (!strcmp(LightSP.name, name))
-        {
-            int prevIndex = IUFindOnSwitchIndex(&LightSP);
-            IUUpdateSwitch(&LightSP, states, names, n);
-            bool rc = controlLight(LightS[0].s == ISS_ON ? TURN_ON_LIGHT : TURN_OFF_LIGHT);
-
-            LightSP.s = rc ? IPS_OK : IPS_ALERT;
-
-            if (rc == false)
-            {
-                IUResetSwitch(&LightSP);
-                LightS[prevIndex].s = ISS_ON;
-            }
-
-            IDSetSwitch(&LightSP, NULL);
-
+        if (processLightBoxSwitch(dev, name, states, names, n))
             return true;
-        }
     }
 
     return INDI::DefaultDevice::ISNewSwitch(dev, name, states, names, n);
 }
 
-bool FlipFlat::ping()
+bool FlipFlat::ISSnoopDevice (XMLEle *root)
 {
+    snoopLightBox(root);
+
+    return INDI::DefaultDevice::ISSnoopDevice(root);
+}
+
+bool FlipFlat::saveConfigItems(FILE *fp)
+{
+    INDI::DefaultDevice::saveConfigItems(fp);
+
+    return saveLightBoxConfigItems(fp);
+}
+
+bool FlipFlat::ping()
+{    
     int nbytes_written=0, nbytes_read=0, rc=-1;
     char errstr[MAXRBUF];
     char command[FLAT_CMD];
@@ -358,7 +324,10 @@ bool FlipFlat::ping()
     }
 
     if (productID == 99)
+    {
+        setDriverInterface(AUX_INTERFACE | LIGHTBOX_INTERFACE | DUSTCAP_INTERFACE);
         isFlipFlat = true;
+    }
     else
         isFlipFlat = false;
 
@@ -374,8 +343,8 @@ bool FlipFlat::getStartupData()
     return (rc1 && rc2 && rc3);
 }
 
-bool FlipFlat::controlCover(int cmd)
-{
+IPState FlipFlat::ParkCap()
+{    
     int nbytes_written=0, nbytes_read=0, rc=-1;
     char errstr[MAXRBUF];
     char command[FLAT_CMD];
@@ -383,10 +352,7 @@ bool FlipFlat::controlCover(int cmd)
 
     tcflush(PortFD, TCIOFLUSH);
 
-    if (cmd == OPEN_COVER)
-        strncpy(command, ">O000", FLAT_CMD);
-    else
-        strncpy(command, ">C000", FLAT_CMD);
+    strncpy(command, ">C000", FLAT_CMD);
 
     DEBUGF(INDI::Logger::DBG_DEBUG, "CMD (%s)", command);
 
@@ -396,14 +362,14 @@ bool FlipFlat::controlCover(int cmd)
     {
         tty_error_msg(rc, errstr, MAXRBUF);
         DEBUGF(INDI::Logger::DBG_ERROR, "%s error: %s.", command, errstr);
-        return false;
+        return IPS_ALERT;
     }
 
     if ( (rc = tty_read_section(PortFD, response, 0xA, FLAT_TIMEOUT, &nbytes_read)) != TTY_OK)
     {
         tty_error_msg(rc, errstr, MAXRBUF);
         DEBUGF(INDI::Logger::DBG_ERROR, "%s: %s.", command, errstr);
-        return false;
+        return IPS_ALERT;
     }
 
     response[nbytes_read-1] = '\0';
@@ -411,19 +377,19 @@ bool FlipFlat::controlCover(int cmd)
     DEBUGF(INDI::Logger::DBG_DEBUG, "RES (%s)", response);
 
     char expectedResponse[FLAT_RES];
-    if (cmd == OPEN_COVER)
-        snprintf(expectedResponse, FLAT_RES, "*O%02d000", productID);
-    else
-        snprintf(expectedResponse, FLAT_RES, "*C%02d000", productID);
+    snprintf(expectedResponse, FLAT_RES, "*C%02d000", productID);
 
     if (!strcmp(response, expectedResponse))
-        return true;
+    {
+        // Set cover status to random value outside of range to force it to refresh
+        prevCoverStatus = 10;
+        return IPS_BUSY;
+    }
     else
-        return false;
-
+        return IPS_ALERT;
 }
 
-bool FlipFlat::controlLight(int cmd)
+IPState FlipFlat::UnParkCap()
 {
     int nbytes_written=0, nbytes_read=0, rc=-1;
     char errstr[MAXRBUF];
@@ -432,7 +398,59 @@ bool FlipFlat::controlLight(int cmd)
 
     tcflush(PortFD, TCIOFLUSH);
 
-    if (cmd == TURN_ON_LIGHT)
+    strncpy(command, ">O000", FLAT_CMD);
+
+    DEBUGF(INDI::Logger::DBG_DEBUG, "CMD (%s)", command);
+
+    command[FLAT_CMD-1] = 0xA;
+
+    if ( (rc = tty_write(PortFD, command, FLAT_CMD, &nbytes_written)) != TTY_OK)
+    {
+        tty_error_msg(rc, errstr, MAXRBUF);
+        DEBUGF(INDI::Logger::DBG_ERROR, "%s error: %s.", command, errstr);
+        return IPS_ALERT;
+    }
+
+    if ( (rc = tty_read_section(PortFD, response, 0xA, FLAT_TIMEOUT, &nbytes_read)) != TTY_OK)
+    {
+        tty_error_msg(rc, errstr, MAXRBUF);
+        DEBUGF(INDI::Logger::DBG_ERROR, "%s: %s.", command, errstr);
+        return IPS_ALERT;
+    }
+
+    response[nbytes_read-1] = '\0';
+
+    DEBUGF(INDI::Logger::DBG_DEBUG, "RES (%s)", response);
+
+    char expectedResponse[FLAT_RES];
+    snprintf(expectedResponse, FLAT_RES, "*O%02d000", productID);
+
+    if (!strcmp(response, expectedResponse))
+    {
+        // Set cover status to random value outside of range to force it to refresh
+        prevCoverStatus = 10;
+        return IPS_BUSY;
+    }
+    else
+        return IPS_ALERT;
+}
+
+bool FlipFlat::EnableLightBox(bool enable)
+{    
+    int nbytes_written=0, nbytes_read=0, rc=-1;
+    char errstr[MAXRBUF];
+    char command[FLAT_CMD];
+    char response[FLAT_RES];
+
+    if (isFlipFlat && ParkCapS[1].s == ISS_ON)
+    {
+        DEBUG(INDI::Logger::DBG_ERROR, "Cannot control light while cap is unparked.");
+        return false;
+    }
+
+    tcflush(PortFD, TCIOFLUSH);
+
+    if (enable)
         strncpy(command, ">L000", FLAT_CMD);
     else
         strncpy(command, ">D000", FLAT_CMD);
@@ -460,7 +478,7 @@ bool FlipFlat::controlLight(int cmd)
     DEBUGF(INDI::Logger::DBG_DEBUG, "RES (%s)", response);
 
     char expectedResponse[FLAT_RES];
-    if (cmd == TURN_ON_LIGHT)
+    if (enable)
         snprintf(expectedResponse, FLAT_RES, "*L%02d000", productID);
     else
         snprintf(expectedResponse, FLAT_RES, "*D%02d000", productID);
@@ -473,7 +491,7 @@ bool FlipFlat::controlLight(int cmd)
 }
 
 bool FlipFlat::getStatus()
-{
+{    
     int nbytes_written=0, nbytes_read=0, rc=-1;
     char errstr[MAXRBUF];
     char command[FLAT_CMD];
@@ -525,25 +543,25 @@ bool FlipFlat::getStatus()
 
         case 1:
             IUSaveText(&StatusT[0], "Closed");
-            if (CoverSP.s == IPS_BUSY || CoverSP.s == IPS_IDLE)
+            if (ParkCapSP.s == IPS_BUSY || ParkCapSP.s == IPS_IDLE)
             {
-                IUResetSwitch(&CoverSP);
-                CoverS[0].s = ISS_ON;
-                CoverSP.s = IPS_OK;
+                IUResetSwitch(&ParkCapSP);
+                ParkCapS[0].s = ISS_ON;
+                ParkCapSP.s = IPS_OK;
                 DEBUG(INDI::Logger::DBG_SESSION, "Cover closed.");
-                IDSetSwitch(&CoverSP, NULL);
+                IDSetSwitch(&ParkCapSP, NULL);
             }
             break;
 
         case 2:
             IUSaveText(&StatusT[0], "Open");
-            if (CoverSP.s == IPS_BUSY || CoverSP.s == IPS_IDLE)
+            if (ParkCapSP.s == IPS_BUSY || ParkCapSP.s == IPS_IDLE)
             {
-                IUResetSwitch(&CoverSP);
-                CoverS[1].s = ISS_ON;
-                CoverSP.s = IPS_OK;
+                IUResetSwitch(&ParkCapSP);
+                ParkCapS[1].s = ISS_ON;
+                ParkCapSP.s = IPS_OK;
                 DEBUG(INDI::Logger::DBG_SESSION, "Cover open.");
-                IDSetSwitch(&CoverSP, NULL);
+                IDSetSwitch(&ParkCapSP, NULL);
             }
             break;
 
@@ -661,7 +679,7 @@ void FlipFlat::TimerHit()
 }
 
 bool FlipFlat::getBrightness()
-{
+{    
     int nbytes_written=0, nbytes_read=0, rc=-1;
     char errstr[MAXRBUF];
     char command[FLAT_CMD];
@@ -715,8 +733,8 @@ bool FlipFlat::getBrightness()
     return true;
 }
 
-bool FlipFlat::setBrightness(int value)
-{
+bool FlipFlat::SetLightBoxBrightness(uint16_t value)
+{    
     int nbytes_written=0, nbytes_read=0, rc=-1;
     char errstr[MAXRBUF];
     char command[FLAT_CMD];
