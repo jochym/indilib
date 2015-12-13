@@ -157,11 +157,17 @@ bool NexStarEvo::Park()
     // This is a designated by celestron parking position
     Abort();
     scope->GoToFast(long(0),long(0),false);
+    TrackState = SCOPE_PARKING;
+    ParkSP.s=IPS_BUSY;
+    IDSetSwitch(&ParkSP, NULL);
+    DEBUG(DBG_NSEVO, "Telescope park in progress...");
+    
     return true;
 }
 
 bool NexStarEvo::UnPark()
 {
+    SetParked(false);
     return true;
 }
 
@@ -586,6 +592,11 @@ void NexStarEvo::TimerHit()
             }
             else
                 break; // The scope is still slewing
+
+        case SCOPE_PARKING:
+            if (!scope->slewing()) SetParked(true);
+            break;
+
 
         case SCOPE_TRACKING:
         {
