@@ -706,6 +706,7 @@ void NexStarEvo::TimerHit()
 bool NexStarEvo::updateLocation(double latitude, double longitude, double elevation)
 {
     UpdateLocation(latitude, longitude, elevation);
+    scope->UpdateLocation(latitude, longitude, elevation);
     return true;
 }
 
