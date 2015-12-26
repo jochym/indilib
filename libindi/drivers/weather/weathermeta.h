@@ -1,7 +1,8 @@
 /*******************************************************************************
   Copyright(c) 2015 Jasem Mutlaq. All rights reserved.
 
-  INDI Weather Underground (TM) Weather Driver
+  INDI Weather Meta Driver. It watches up to 4 weather drivers and report worst case
+  of each in a single property.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms of the GNU General Public License as published by the Free
@@ -22,40 +23,50 @@
   file called LICENSE.
 *******************************************************************************/
 
-#ifndef WUNDERGROUND_H
-#define WUNDERGROUND_H
+#ifndef WEATHERMETA_H
+#define WEATHERMETA_H
 
-#include "indiweather.h"
+#include "defaultdevice.h"
 
-class WunderGround : public INDI::Weather
+class WeatherMeta : public INDI::DefaultDevice
 {
     public:
-    WunderGround();
-    virtual ~WunderGround();
+    WeatherMeta();
+    virtual ~WeatherMeta();
 
     //  Generic indi device entries
     bool Connect();
     bool Disconnect();
     const char *getDefaultName();
 
+    virtual bool ISSnoopDevice(XMLEle *root);
+
     virtual bool initProperties();
+    virtual bool updateProperties();
     virtual void ISGetProperties (const char *dev);
     virtual bool ISNewText (const char *dev, const char *name, char *texts[], char *names[], int n);
 
     protected:
 
-    virtual IPState updateWeather();
-
     virtual bool saveConfigItems(FILE *fp);
-    virtual bool updateLocation(double latitude, double longitude, double elevation);
 
 private:
+    void updateOverallState();
+    void updateUpdatePeriod();
 
-    IText wunderAPIKeyT[1];
-    ITextVectorProperty wunderAPIKeyTP;
+    // Active stations
+    IText ActiveDeviceT[4];
+    ITextVectorProperty ActiveDeviceTP;
 
-    double wunderLat, wunderLong;
+    // Stations status
+    ILight StationL[4];
+    ILightVectorProperty StationLP;
 
+    // Update Period
+    INumber UpdatePeriodN[1];
+    INumberVectorProperty UpdatePeriodNP;
+
+    double updatePeriods[4];
 };
 
-#endif // WUNDERGROUND_H
+#endif // WEATHERMETA_H

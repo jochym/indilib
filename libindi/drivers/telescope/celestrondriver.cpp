@@ -146,6 +146,8 @@ bool check_celestron_connection(int fd)
       }
       else
       {
+          tcflush(fd, TCIOFLUSH);
+
           if ( (errcode = tty_write(fd, initCMD, 2, &nbytes_written)) != TTY_OK)
           {
               tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -236,6 +238,8 @@ bool get_celestron_version (int fd, FirmwareInfo *info)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -267,8 +271,6 @@ bool get_celestron_version (int fd, FirmwareInfo *info)
          info->controllerVersion = atof(versionStr);
          info->Version  = versionStr;
 
-         tcflush(fd, TCIFLUSH);
-
           return true;
       }
     }
@@ -297,6 +299,8 @@ bool get_celestron_model (int fd, FirmwareInfo *info)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -330,8 +334,6 @@ bool get_celestron_model (int fd, FirmwareInfo *info)
               info->Model = "Unknown";
           }
 
-          tcflush(fd, TCIFLUSH);
-
           return true;
       }
     }
@@ -361,6 +363,8 @@ bool get_celestron_ra_firmware(int fd, FirmwareInfo *info)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, (char *) cmd, 8, &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -391,8 +395,6 @@ bool get_celestron_ra_firmware(int fd, FirmwareInfo *info)
 
          info->RAFirmware  = versionStr;
 
-         tcflush(fd, TCIFLUSH);
-
          return true;
       }
 
@@ -422,6 +424,8 @@ bool get_celestron_dec_firmware(int fd, FirmwareInfo *info)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, (char *) cmd, 8, &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -452,8 +456,6 @@ bool get_celestron_dec_firmware(int fd, FirmwareInfo *info)
 
          info->DEFirmware = versionStr;
 
-         tcflush(fd, TCIFLUSH);
-
          return true;
       }
 
@@ -483,6 +485,8 @@ bool get_celestron_gps_firmware(int fd, FirmwareInfo *info)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, (char *) cmd, 8, &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -512,9 +516,6 @@ bool get_celestron_gps_firmware(int fd, FirmwareInfo *info)
           snprintf(versionStr, 8, "%01d.%01d", major, minor);
 
          info->GPSFirmware = versionStr;
-
-         tcflush(fd, TCIFLUSH);
-
          return true;
       }
 
@@ -602,6 +603,8 @@ int SendPulseCmd(int fd, CELESTRON_DIRECTION direction, signed char rate, unsign
    }
    else
    {
+      tcflush(fd, TCIOFLUSH);
+
        // Send command and check success.
        DEBUGDEVICE(celestron_device, INDI::Logger::DBG_DEBUG, "   ISSUING COMMAND");
        if ( (errcode = tty_write(fd, cmd, 8, &nbytes_written)) != TTY_OK)
@@ -627,7 +630,6 @@ int SendPulseCmd(int fd, CELESTRON_DIRECTION direction, signed char rate, unsign
      response[nbytes_read] = '\0';
      DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_WARNING, "    NBYTES = %i, RESPONSE = %02X", nbytes_read, response[0]);
 
-     tcflush(fd, TCIFLUSH);
      return true;
    }
 
@@ -669,6 +671,8 @@ int SendPulseStatusCmd(int fd, CELESTRON_DIRECTION direction, bool & pulse_state
    }
    else
    {
+      tcflush(fd, TCIOFLUSH);
+
        DEBUGDEVICE(celestron_device, INDI::Logger::DBG_DEBUG, "   ISSUING COMMAND");
        if ( (errcode = tty_write(fd, cmd, 8, &nbytes_written)) != TTY_OK)
        {
@@ -690,8 +694,6 @@ int SendPulseStatusCmd(int fd, CELESTRON_DIRECTION direction, bool & pulse_state
    {
      response[nbytes_read] = '\0';
      DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_WARNING, "    NBYTES = %i, RESPONSE = %02X %02X", nbytes_read, (unsigned char)response[0], (unsigned char)response[1]);
-
-     tcflush(fd, TCIFLUSH);
      
      if(response[0]==0 && response[1]=='#'){
        pulse_state = 0;
@@ -755,6 +757,8 @@ bool start_celestron_motion(int fd, CELESTRON_DIRECTION dir, CELESTRON_SLEW_RATE
    }
    else
    {
+       tcflush(fd, TCIOFLUSH);
+
        if ( (errcode = tty_write(fd, cmd, 8, &nbytes_written)) != TTY_OK)
        {
            tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -776,7 +780,6 @@ bool start_celestron_motion(int fd, CELESTRON_DIRECTION dir, CELESTRON_SLEW_RATE
      response[nbytes_read] = '\0';
      DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_DEBUG, "RES (%s)", response);
 
-     tcflush(fd, TCIFLUSH);
      return true;
    }
 
@@ -817,6 +820,8 @@ bool stop_celestron_motion(int fd, CELESTRON_DIRECTION dir)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, 8, &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -836,8 +841,6 @@ bool stop_celestron_motion(int fd, CELESTRON_DIRECTION dir)
     {
       response[nbytes_read] = '\0';
       DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_DEBUG, "RES (%s)", response);
-
-      tcflush(fd, TCIFLUSH);
       return true;
     }
 
@@ -863,6 +866,8 @@ bool abort_celestron(int fd)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -882,8 +887,6 @@ bool abort_celestron(int fd)
     {
       response[nbytes_read] = '\0';
       DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_DEBUG, "RES (%s)", response);
-
-      tcflush(fd, TCIFLUSH);
       return true;
     }
 
@@ -923,6 +926,8 @@ bool slew_celestron(int fd, double ra, double dec)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -945,13 +950,11 @@ bool slew_celestron(int fd, double ra, double dec)
 
       if (!strcmp(response, "#"))
       {
-          tcflush(fd, TCIFLUSH);
           return true;
       }
       else
       {
           DEBUGDEVICE(celestron_device, INDI::Logger::DBG_ERROR, "Requested object is below horizon.");
-          tcflush(fd, TCIFLUSH);
           return false;
       }
 
@@ -993,6 +996,8 @@ bool slew_celestron_azalt(int fd, double latitude, double az, double alt)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -1015,13 +1020,11 @@ bool slew_celestron_azalt(int fd, double latitude, double az, double alt)
 
       if (!strcmp(response, "#"))
       {
-          tcflush(fd, TCIFLUSH);
           return true;
       }
       else
       {
           DEBUGDEVICE(celestron_device, INDI::Logger::DBG_ERROR, "Requested object is below horizon.");
-          tcflush(fd, TCIFLUSH);
           return false;
       }
 
@@ -1063,6 +1066,8 @@ bool sync_celestron(int fd, double ra, double dec)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -1085,13 +1090,11 @@ bool sync_celestron(int fd, double ra, double dec)
 
       if (!strcmp(response, "#"))
       {
-          tcflush(fd, TCIFLUSH);
           return true;
       }
       else
       {
           DEBUGDEVICE(celestron_device, INDI::Logger::DBG_ERROR, "Requested object is below horizon.");
-          tcflush(fd, TCIFLUSH);
           return false;
       }
 
@@ -1121,6 +1124,8 @@ bool get_celestron_coords(int fd, double *ra, double *dec)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -1138,7 +1143,6 @@ bool get_celestron_coords(int fd, double *ra, double *dec)
 
     if (nbytes_read > 0)
     {
-      tcflush(fd, TCIFLUSH);
       response[nbytes_read] = '\0';      
 
       char ra_str[16], de_str[16];
@@ -1198,6 +1202,8 @@ bool get_celestron_coords_azalt(int fd, double latitude, double *az, double *alt
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -1215,7 +1221,6 @@ bool get_celestron_coords_azalt(int fd, double latitude, double *az, double *alt
 
     if (nbytes_read > 0)
     {
-      tcflush(fd, TCIFLUSH);
       response[nbytes_read] = '\0';      
 
       uint16_t CELESTRONAZ=0, CELESTRONALT=0;
@@ -1284,6 +1289,8 @@ bool set_celestron_location(int fd, double longitude, double latitude)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, 9, &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -1304,7 +1311,6 @@ bool set_celestron_location(int fd, double longitude, double latitude)
       response[nbytes_read] = '\0';
       DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_DEBUG, "RES (%s)", response);
 
-      tcflush(fd, TCIFLUSH);
       return true;
     }
 
@@ -1352,6 +1358,8 @@ bool set_celestron_datetime(int fd, struct ln_date *utc, double utc_offset)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, 9, &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -1372,7 +1380,6 @@ bool set_celestron_datetime(int fd, struct ln_date *utc, double utc_offset)
       response[nbytes_read] = '\0';
       DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_DEBUG, "RES (%s)", response);
 
-      tcflush(fd, TCIFLUSH);
       return true;
     }
 
@@ -1407,6 +1414,8 @@ bool get_celestron_utc_date_time(int fd, double *utc_hours, int *yy, int *mm, in
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -1424,7 +1433,6 @@ bool get_celestron_utc_date_time(int fd, double *utc_hours, int *yy, int *mm, in
 
     if (nbytes_read > 0)
     {
-      tcflush(fd, TCIFLUSH);
       response[nbytes_read] = '\0';
       unsigned char *res = (unsigned char *) response;
       DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_DEBUG, "RES (%02X %02X %02X %02X %02X %02X %02X %02X)", res[0],res[1],res[2],res[3],res[4],res[5],res[6],res[7]);
@@ -1491,6 +1499,8 @@ bool is_scope_slewing(int fd)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -1543,6 +1553,8 @@ bool get_celestron_track_mode(int fd, CELESTRON_TRACK_MODE *mode)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -1561,7 +1573,7 @@ bool get_celestron_track_mode(int fd, CELESTRON_TRACK_MODE *mode)
     if (nbytes_read > 0)
     {
       response[nbytes_read] = '\0';
-      DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_DEBUG, "RES (%s)", response);
+      DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_DEBUG, "RES (%02X %02X)", response[0], response[1]);
 
       tcflush(fd, TCIFLUSH);
 
@@ -1596,6 +1608,8 @@ bool set_celestron_track_mode(int fd, CELESTRON_TRACK_MODE mode)
     }
     else
     {
+        tcflush(fd, TCIOFLUSH);
+
         if ( (errcode = tty_write(fd, cmd, 2, &nbytes_written)) != TTY_OK)
         {
             tty_error_msg(errcode, errmsg, MAXRBUF);
@@ -1635,7 +1649,7 @@ bool set_celestron_track_mode(int fd, CELESTRON_TRACK_MODE mode)
 
 bool hibernate (int fd)
 {
-    char cmd[] = "x";
+    char cmd[] = "x#";
     int errcode = 0;
     char errmsg[MAXRBUF];
     int nbytes_written=0;
@@ -1644,6 +1658,8 @@ bool hibernate (int fd)
 
     if (celestron_simulation)
         return true;
+
+    tcflush(fd, TCIOFLUSH);
 
     if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
     {
@@ -1657,15 +1673,19 @@ bool hibernate (int fd)
 
 bool wakeup (int fd)
 {
-    char cmd[] = "y";
+    char cmd[] = "y#";
     int errcode = 0;
     char errmsg[MAXRBUF];
     int nbytes_written=0;
+    int nbytes_read=0;
+    char response[1];
 
     DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_DEBUG, "CMD (%s)", cmd);
 
     if (celestron_simulation)
         return true;
+
+    tcflush(fd, TCIOFLUSH);
 
     if ( (errcode = tty_write(fd, cmd, strlen(cmd), &nbytes_written)) != TTY_OK)
     {
@@ -1674,7 +1694,33 @@ bool wakeup (int fd)
         return false;
     }
 
-    return true;
+    if ( (errcode = tty_read(fd, response, 1, CELESTRON_TIMEOUT, &nbytes_read)))
+    {
+        tty_error_msg(errcode, errmsg, MAXRBUF);
+        DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_ERROR, "%s", errmsg);
+        return false;
+    }
+
+    if (nbytes_read > 0)
+    {
+      response[nbytes_read] = '\0';
+      DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_DEBUG, "RES (%s)", response);
+
+      if (!strcmp(response, "#"))
+      {
+          tcflush(fd, TCIFLUSH);
+          return true;
+      }
+      else
+      {
+          DEBUGDEVICE(celestron_device, INDI::Logger::DBG_ERROR, "Error waking up the mount.");
+          tcflush(fd, TCIFLUSH);
+          return false;
+      }
+    }
+
+    DEBUGFDEVICE(celestron_device, INDI::Logger::DBG_ERROR, "Received #%d bytes, expected 1.", nbytes_read);
+    return false;
 }
 
 uint16_t get_angle_fraction(double angle)

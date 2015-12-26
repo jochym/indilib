@@ -53,6 +53,11 @@
 
 #include <memory>
 
+#ifdef WITH_ALIGN
+#include <alignment/DriverCommon.h>   // For DBG_ALIGNMENT
+using namespace INDI::AlignmentSubsystem;
+#endif
+
 #define DEVICE_NAME "EQMod Mount"
 
 // We declare an auto pointer to EQMod.
@@ -143,6 +148,9 @@ void ISNewNumber(const char *dev, const char *name, double values[], char *names
 
 void ISNewBLOB (const char *dev, const char *name, int sizes[], int blobsizes[], char *blobs[], char *formats[], char *names[], int n)
 {
+  #ifdef WITH_ALIGN
+  eqmod->ISNewBLOB(dev, name, sizes, blobsizes, blobs, formats, names, n);
+  #else
     INDI_UNUSED(dev);
     INDI_UNUSED(name);
     INDI_UNUSED(sizes);
@@ -151,6 +159,7 @@ void ISNewBLOB (const char *dev, const char *name, int sizes[], int blobsizes[],
     INDI_UNUSED(formats);
     INDI_UNUSED(names);
     INDI_UNUSED(n);
+  #endif
 }
 void ISSnoopDevice (XMLEle *root)
 {
@@ -287,7 +296,9 @@ double EQMod::getJulianDate()
   //IDLog("     ln_date with nsecs %02d:%02d:%.9f\n", lndate.hours, lndate.minutes, lndate.seconds);
   lastclockupdate=currentclock;
   juliandate=ln_get_julian_day(&lndate);
+  //IDLog("julian diff: %g\n", juliandate - ln_get_julian_from_sys());
   return juliandate;
+  //return ln_get_julian_from_sys();
 }
 
 double EQMod::getLst(double jd, double lng)
@@ -320,7 +331,13 @@ bool EQMod::initProperties()
     SetParkDataType(PARK_RA_DEC_ENCODER);
 
     setDriverInterface(getDriverInterface() | GUIDER_INTERFACE);
+#ifdef WITH_ALIGN
+    InitAlignmentProperties(this);
 
+    // Force the alignment system to always be on
+    getSwitch("ALIGNMENT_SUBSYSTEM_ACTIVE")->sp[0].s = ISS_ON;
+    
+#endif
     return true;
 }
 
@@ -481,10 +498,12 @@ bool EQMod::updateProperties()
 	  MountInformationTP=NULL;
 	} 
       }
-
+#ifdef WITH_ALIGN_GEEHALEL
     if (align) {
       if (!align->updateProperties()) return false;
     }
+#endif
+    
 #ifdef WITH_SCOPE_LIMITS
     if (horizon) {
       if (!horizon->updateProperties()) return false;
@@ -525,7 +544,12 @@ bool EQMod::Connect(const char *port, uint16_t baud)
     return(e.DefaultHandleException(this));
   }
 
-  DEBUG(INDI::Logger::DBG_SESSION, "Successfully connected to EQMod Mount.");
+#ifdef WITH_ALIGN
+ // Set this according to mount type 
+ SetApproximateMountAlignmentFromMountType(EQUATORIAL);
+#endif
+
+ DEBUG(INDI::Logger::DBG_SESSION, "Successfully connected to EQMod Mount.");
   return true;
 }
 
@@ -621,21 +645,47 @@ bool EQMod::ReadScopeStatus() {
     DEBUGF(DBG_SCOPE_STATUS, "Current encoders RA=%ld DE=%ld", currentRAEncoder, currentDEEncoder);
     EncodersToRADec(currentRAEncoder, currentDEEncoder, lst, &currentRA, &currentDEC, &currentHA);
     alignedRA=currentRA; alignedDEC=currentDEC;
+#ifdef WITH_ALIGN_GEEHALEL
     if (align) 
       align->GetAlignedCoords(syncdata, juliandate, &lnobserver, currentRA, currentDEC, &alignedRA, &alignedDEC);
-    else {
+    else 
+#endif
+#ifdef WITH_ALIGN
+    const char *maligns[3]={"ZENITH", "NORTH", "SOUTH"};
+    struct ln_equ_posn RaDec;
+    // Use HA/Dec as  telescope coordinate system
+    RaDec.ra = ((lst - currentRA) * 360.0) / 24.0;
+    RaDec.dec = currentDEC;
+    TelescopeDirectionVector TDV = TelescopeDirectionVectorFromLocalHourAngleDeclination(RaDec);    
+    DEBUGF(INDI::AlignmentSubsystem::DBG_ALIGNMENT, "Status: Mnt. Algnt. %s Date %lf encoders RA=%ld DE=%ld Telescope RA %lf DEC %lf",
+	   maligns[ GetApproximateMountAlignment()], juliandate,  currentRAEncoder, currentDEEncoder, currentRA, currentDEC);
+    DEBUGF(INDI::AlignmentSubsystem::DBG_ALIGNMENT, " Direction RA(deg.)  %lf DEC %lf TDV(x %lf y %lf z %lf)",
+	   RaDec.ra, RaDec.dec, TDV.x, TDV.y, TDV.z);
+    if ((GetAlignmentDatabase().size() < 2) || (!TransformTelescopeToCelestial( TDV, alignedRA, alignedDEC)))
+#endif
+      {
       if (syncdata.lst != 0.0) {
+	DEBUGF(DBG_SCOPE_STATUS, "Aligning with last sync delta RA %g DE %g", syncdata.deltaRA, syncdata.deltaDEC);
 	// should check values are in range!
 	alignedRA += syncdata.deltaRA;
 	alignedDEC += syncdata.deltaDEC;
-	if (alignedDEC > 90.0 || alignedDEC < 90.0) {
+	if (alignedDEC > 90.0 || alignedDEC < -90.0) {
 	  alignedRA += 12.00;
 	  if (alignedDEC > 0.0) alignedDEC = 180.0 - alignedDEC;
 	  else alignedDEC = -180.0 - alignedDEC;
 	}
 	alignedRA=range24(alignedRA);
       }
+#ifdef WITH_ALIGN
+      DEBUGF(INDI::AlignmentSubsystem::DBG_ALIGNMENT, "Failed TransformTelescopeToCelestial: Scope RA=%g Scope DE=%f, Aligned RA=%f DE=%f", currentRA, currentDEC, alignedRA, alignedDEC);  
+#endif
+      }
+    
+#ifdef WITH_ALIGN
+    else {
+      DEBUGF(INDI::AlignmentSubsystem::DBG_ALIGNMENT, "TransformTelescopeToCelestial: Scope RA=%f Scope DE=%f, Aligned RA=%f DE=%f", currentRA, currentDEC, alignedRA, alignedDEC);  
     }
+#endif
     NewRaDec(alignedRA, alignedDEC);
     lnradec.ra =(alignedRA * 360.0) / 24.0;
     lnradec.dec =alignedDEC;
@@ -1083,14 +1133,38 @@ bool EQMod::Goto(double r,double d)
     bzero(&gotoparams, sizeof(gotoparams));
     gotoparams.ratarget = r;  gotoparams.detarget = d;
     gotoparams.racurrent = currentRA; gotoparams.decurrent = currentDEC;
+#ifdef WITH_ALIGN_GEEHALEL
     if (align) 
       align->AlignGoto(syncdata, juliandate, &lnobserver, &gotoparams.ratarget, &gotoparams.detarget);
-    else {
+    else 
+#endif
+#ifdef WITH_ALIGN
+    TelescopeDirectionVector TDV;
+    if ((GetAlignmentDatabase().size() < 2) || (!TransformCelestialToTelescope(r, d, 0.0, TDV)))
+#endif      
+      {
       if (syncdata.lst != 0.0) {
 	gotoparams.ratarget -= syncdata.deltaRA;
 	gotoparams.detarget -= syncdata.deltaDEC;
       }
+#ifdef WITH_ALIGN
+      DEBUGF(INDI::AlignmentSubsystem::DBG_ALIGNMENT, "Failed TransformCelestialToTelescope:  RA=%lf DE=%lf, Goto RA=%lf DE=%lf", r, d, gotoparams.ratarget, gotoparams.detarget);  
+#endif     
+      }
+#ifdef WITH_ALIGN
+    else {
+      struct ln_equ_posn RaDec;
+      LocalHourAngleDeclinationFromTelescopeDirectionVector(TDV, RaDec);
+      DEBUGF(INDI::AlignmentSubsystem::DBG_ALIGNMENT, "TransformCelestialToTelescope: RA=%lf DE=%lf, TDV (x :%lf, y: %lf, z: %lf), local hour RA %lf DEC %lf", r, d,
+	     TDV.x, TDV.y, TDV.z, RaDec.ra, RaDec.dec);
+      RaDec.ra=(RaDec.ra * 24.0) / 360.0;
+      RaDec.ra=range24(lst - RaDec.ra);
+
+      gotoparams.ratarget= RaDec.ra;
+      gotoparams.detarget= RaDec.dec;
+      DEBUGF(INDI::AlignmentSubsystem::DBG_ALIGNMENT, "TransformCelestialToTelescope: RA=%lf DE=%lf, Goto RA=%lf DE=%lf", r, d, gotoparams.ratarget, gotoparams.detarget);    
     }
+#endif  
 
     gotoparams.racurrentencoder = currentRAEncoder; gotoparams.decurrentencoder = currentDEEncoder;
     gotoparams.completed = false; 
@@ -1183,6 +1257,7 @@ bool EQMod::Sync(double ra,double dec)
   SyncData tmpsyncdata;
   double ha, targetra;
   PierSide targetpier;
+  double telescopeHA;
   
 // get current mount position asap
   tmpsyncdata.telescopeRAEncoder=mount->GetRAEncoder();
@@ -1216,7 +1291,7 @@ bool EQMod::Sync(double ra,double dec)
   tmpsyncdata.targetDECEncoder=EncoderFromDec(dec, targetpier, zeroDEEncoder, totalDEEncoder, Hemisphere);
 
   try {
-    EncodersToRADec( tmpsyncdata.telescopeRAEncoder, tmpsyncdata.telescopeDECEncoder, lst, &tmpsyncdata.telescopeRA, &tmpsyncdata.telescopeDEC, NULL);
+    EncodersToRADec( tmpsyncdata.telescopeRAEncoder, tmpsyncdata.telescopeDECEncoder, lst, &tmpsyncdata.telescopeRA, &tmpsyncdata.telescopeDEC, &telescopeHA);
   } catch(EQModError e) {
     return(e.DefaultHandleException(this));
   }    
@@ -1226,13 +1301,45 @@ bool EQMod::Sync(double ra,double dec)
   tmpsyncdata.deltaDEC= tmpsyncdata.targetDEC - tmpsyncdata.telescopeDEC;
   tmpsyncdata.deltaRAEncoder = tmpsyncdata.targetRAEncoder - tmpsyncdata.telescopeRAEncoder;
   tmpsyncdata.deltaDECEncoder= tmpsyncdata.targetDECEncoder - tmpsyncdata.telescopeDECEncoder;
-
+#ifdef WITH_ALIGN_GEEHALEL
   if (align && !align->isStandardSync()) {
     align->AlignSync(syncdata, tmpsyncdata);
     return true;
   }
   if (align && align->isStandardSync())
     align->AlignStandardSync(syncdata, &tmpsyncdata, &lnobserver);
+#endif
+#ifdef WITH_ALIGN
+  {
+    AlignmentDatabaseEntry NewEntry;
+    struct ln_equ_posn RaDec;
+    RaDec.ra = ((lst -tmpsyncdata.telescopeRA) * 360.0) / 24.0;
+    RaDec.dec = tmpsyncdata.telescopeDEC;    
+    //NewEntry.ObservationJulianDate = ln_get_julian_from_sys();
+    NewEntry.ObservationJulianDate = juliandate;
+    NewEntry.RightAscension = ra;
+    NewEntry.Declination = dec;
+    NewEntry.TelescopeDirection = TelescopeDirectionVectorFromLocalHourAngleDeclination(RaDec);
+    NewEntry.PrivateDataSize = 0;
+    DEBUGF(INDI::AlignmentSubsystem::DBG_ALIGNMENT, "New sync point Date %lf RA %lf DEC %lf TDV(x %lf y %lf z %lf)",
+                    NewEntry.ObservationJulianDate, NewEntry.RightAscension, NewEntry.Declination,
+                    NewEntry.TelescopeDirection.x, NewEntry.TelescopeDirection.y, NewEntry.TelescopeDirection.z);
+    if (!CheckForDuplicateSyncPoint(NewEntry))
+    {
+
+        GetAlignmentDatabase().push_back(NewEntry);
+
+        // Tell the client about size change
+        UpdateSize();
+
+        // Tell the math plugin to reinitialise
+        Initialise(this);
+
+	if (GetAlignmentDatabase().size() >= 2)  return true;
+    }
+    if (GetAlignmentDatabase().size() >= 2) return false;
+  }
+#endif
   syncdata2=syncdata;
   syncdata=tmpsyncdata;
 
@@ -1461,9 +1568,10 @@ bool EQMod::ISNewNumber (const char *dev, const char *name, double values[], cha
       
     }
 
-
+#ifdef WITH_ALIGN_GEEHALEL
   if (align) { compose=align->ISNewNumber(dev,name,values,names,n); if (compose) return true;}
-
+#endif
+  
 #ifdef WITH_SIMULATOR
   if (simulator) { 
       compose=simulator->ISNewNumber(dev,name,values,names,n); if (compose) return true;
@@ -1476,6 +1584,9 @@ bool EQMod::ISNewNumber (const char *dev, const char *name, double values[], cha
     }
 #endif
 
+    #ifdef WITH_ALIGN
+    ProcessAlignmentNumberProperties(this, name, values, names, n);
+    #endif
     //  if we didn't process it, continue up the chain, let somebody else
     //  give it a shot
     return INDI::Telescope::ISNewNumber(dev,name,values,names,n);
@@ -1655,9 +1766,10 @@ bool EQMod::ISNewSwitch (const char *dev, const char *name, ISState *states, cha
 
 
     }
-
+#ifdef WITH_ALIGN_GEEHALEL
     if (align) { compose=align->ISNewSwitch(dev,name,states,names,n); if (compose) return true;}
-
+#endif
+    
 #ifdef WITH_SIMULATOR
     if (simulator) { 
       compose=simulator->ISNewSwitch(dev,name,states,names,n); if (compose) return true;
@@ -1668,7 +1780,10 @@ bool EQMod::ISNewSwitch (const char *dev, const char *name, ISState *states, cha
       compose=horizon->ISNewSwitch(dev,name,states,names,n); if (compose) return true;
     }
 #endif
-
+    #ifdef WITH_ALIGN
+    ProcessAlignmentSwitchProperties(this, name, states, names, n);
+    #endif
+    
     INDI::Logger::ISNewSwitch(dev,name,states,names,n);
 
     //  Nobody has claimed this, so, ignore it
@@ -1678,9 +1793,9 @@ bool EQMod::ISNewSwitch (const char *dev, const char *name, ISState *states, cha
 bool EQMod::ISNewText (const char *dev, const char *name, char *texts[], char *names[], int n) 
 {
   bool compose;
-
+#ifdef WITH_ALIGN_GEEHALEL
   if (align) { compose=align->ISNewText(dev,name,texts,names,n); if (compose) return true;}
-
+#endif
 #ifdef WITH_SIMULATOR
   if (simulator) { 
     compose=simulator->ISNewText(dev,name,texts,names,n); if (compose) return true;
@@ -1691,10 +1806,25 @@ bool EQMod::ISNewText (const char *dev, const char *name, char *texts[], char *n
       compose=horizon->ISNewText(dev,name,texts,names,n); if (compose) return true;
     }
 #endif
-
+    #ifdef WITH_ALIGN
+    ProcessAlignmentTextProperties(this, name, texts, names, n);
+    #endif
   //  Nobody has claimed this, so, ignore it
   return INDI::Telescope::ISNewText(dev,name,texts,names,n);
 }
+
+#ifdef WITH_ALIGN
+bool EQMod::ISNewBLOB (const char *dev, const char *name, int sizes[], int blobsizes[], char *blobs[], char *formats[], char *names[], int n)
+{
+    if(strcmp(dev,getDeviceName())==0)
+    {
+        // Process alignment properties
+         ProcessAlignmentBLOBProperties(this, name, sizes, blobsizes, blobs, formats, names, n);
+    }
+    // Pass it up the chain
+    return INDI::Telescope::ISNewBLOB(dev, name, sizes, blobsizes, blobs, formats, names, n);
+}
+#endif
 
 bool EQMod::updateTime(ln_date *lndate_utc, double utc_offset)
 {
@@ -2067,6 +2197,11 @@ bool EQMod::updateLocation(double latitude, double longitude, double elevation)
   lnobserver.lat =  latitude;
   if (latitude < 0.0) SetSouthernHemisphere(true); 
   else SetSouthernHemisphere(false);
+  #ifdef WITH_ALIGN
+  INDI::AlignmentSubsystem::AlignmentSubsystemForDrivers::UpdateLocation(latitude, longitude, elevation);
+  // Set this according to mount type 
+  SetApproximateMountAlignmentFromMountType(EQUATORIAL);
+  #endif
   DEBUGF(INDI::Logger::DBG_SESSION,"updateLocation: long = %g lat = %g", lnobserver.lng, lnobserver.lat);
   return true;
 }
@@ -2094,10 +2229,10 @@ void EQMod::SetDefaultPark()
 bool EQMod::saveConfigItems(FILE *fp)
 {
     INDI::Telescope::saveConfigItems(fp);
-
+#ifdef WITH_ALIGN_GEEHALEL
     if (align)
         align->saveConfigItems(fp);
-
+#endif
     return true;
 }
 
