@@ -27,6 +27,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <zlib.h>
 #include <errno.h>
 #include <dirent.h>
@@ -550,6 +551,9 @@ void INDI::CCD::ISGetProperties (const char *dev)
 {    
     DefaultDevice::ISGetProperties(dev);
 
+    defineText(&ActiveDeviceTP);
+    loadConfig(true, "ACTIVE_DEVICES");
+
     // Streamer
     #ifdef __linux__
     if (HasStreaming())
@@ -632,8 +636,7 @@ bool INDI::CCD::updateProperties()
         {
           defineSwitch(&GuideCCD.RapidGuideSetupSP);
           defineNumber(&GuideCCD.RapidGuideDataNP);
-        }
-        defineText(&ActiveDeviceTP);
+        }        
         defineSwitch(&WorldCoordSP);
         defineSwitch(&UploadSP);
 
@@ -692,7 +695,6 @@ bool INDI::CCD::updateProperties()
             deleteProperty(PrimaryCCD.ResetSP.name);
         if (HasBayer())
             deleteProperty(BayerTP.name);
-        deleteProperty(ActiveDeviceTP.name);
         if (WorldCoordS[0].s == ISS_ON)
         {
             deleteProperty(TelescopeTypeSP.name);
@@ -2254,6 +2256,15 @@ int INDI::CCD::getFileIndex(const char *dir, const char *prefix, const char *ext
 
     std::string prefixSearch = prefix;
     prefixSearch.replace(prefixSearch.find("XXX"), 3, "");
+
+    // Create directory if does not exist
+    struct stat st = {0};
+    if (stat(dir, &st) == -1)
+    {
+       DEBUGF(INDI::Logger::DBG_DEBUG, "Creating directory %s...", dir);
+       if (mkdir(dir, 0755) == -1)
+           DEBUGF(INDI::Logger::DBG_ERROR, "Error creating directory %s (%s)", dir, strerror(errno));
+    }
 
     dpdf = opendir(dir);
     if (dpdf != NULL)

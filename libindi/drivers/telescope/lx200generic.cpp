@@ -44,7 +44,8 @@
 #include "lx200zeq25.h"
 #include "lx200pulsar2.h"
 #include "lx200fs2.h"
-
+#include "lx200ss2000pc.h"
+					       
 // We declare an auto pointer to LX200Generic.
 std::unique_ptr<LX200Generic> telescope;
 
@@ -131,6 +132,12 @@ void ISInit()
         IDLog("initializing from pulsar2 device...\n");
 
         if(telescope.get() == 0) telescope.reset(new LX200Pulsar2());
+ }
+ else if (strstr(me, "indi_lx200ss2000pc"))
+ {
+        IDLog("initializing from skysensor2000pc device...\n");
+
+        if(telescope.get() == 0) telescope.reset(new LX200SS2000PC());
  }
  else if (strstr(me, "indi_lx200fs2"))
  {
@@ -381,7 +388,7 @@ bool LX200Generic::checkConnection()
     return (check_lx200_connection(PortFD) == 0);
 }
 
-bool LX200Generic::Connect(const char *port, uint16_t baud)
+bool LX200Generic::Connect(const char *port, uint32_t baud)
 {
     if (isSimulation())
     {

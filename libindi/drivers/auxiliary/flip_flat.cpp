@@ -272,8 +272,7 @@ bool FlipFlat::ISSnoopDevice (XMLEle *root)
 
 bool FlipFlat::saveConfigItems(FILE *fp)
 {
-    INDI::DefaultDevice::saveConfigItems(fp);
-
+    IUSaveConfigText(fp, &PortTP);
     return saveLightBoxConfigItems(fp);
 }
 

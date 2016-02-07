@@ -31,6 +31,9 @@
 #include <string.h>
 #include <sys/stat.h>
 
+using namespace INDI::AlignmentSubsystem;
+
+
 // We declare an auto pointer to Synscan.
 std::unique_ptr<SynscanMount> synscan(new SynscanMount());
 
@@ -74,7 +77,7 @@ void ISSnoopDevice (XMLEle *root)
 
 SynscanMount::SynscanMount()
 {    
-    SetTelescopeCapability(TELESCOPE_CAN_PARK | TELESCOPE_CAN_ABORT,SYNSCAN_SLEW_RATES);
+    SetTelescopeCapability(TELESCOPE_CAN_PARK | TELESCOPE_CAN_ABORT | TELESCOPE_CAN_SYNC | TELESCOPE_HAS_TIME | TELESCOPE_HAS_LOCATION ,SYNSCAN_SLEW_RATES);
     SetParkDataType(PARK_RA_DEC_ENCODER);
     strcpy(LastParkRead,"");
     SlewRate=5;
@@ -87,10 +90,123 @@ SynscanMount::~SynscanMount()
     //dtor
 }
 
+bool SynscanMount::Connect()
+{
+    bool rc=false;
+
+    if(isConnected()) return true;
+
+    //rc=Connect(PortT[0].text, atoi(IUFindOnSwitch(&BaudRateSP)->name));
+    rc=INDI::Telescope::Connect();
+
+    if(rc) {
+    }
+    return rc;
+}
+
+
 const char * SynscanMount::getDefaultName()
 {
     return "SynScan";
 }
+
+bool SynscanMount::initProperties()
+{
+    bool r;
+
+
+
+//fprintf(stderr,"Synscan initProperties\n");
+    //  call base class
+    r=INDI::Telescope::initProperties();
+
+    //SetTelescopeCapability(TELESCOPE_CAN_ABORT | TELESCOPE_CAN_SYNC | TELESCOPE_HAS_TIME | TELESCOPE_HAS_LOCATION ,SYNSCAN_SLEW_RATES);
+    SetTelescopeCapability(TELESCOPE_CAN_PARK | TELESCOPE_CAN_ABORT | TELESCOPE_CAN_SYNC | TELESCOPE_HAS_TIME | TELESCOPE_HAS_LOCATION ,SYNSCAN_SLEW_RATES);
+    SetParkDataType(PARK_RA_DEC_ENCODER);
+
+
+    //  probably want to debug this
+    addDebugControl();
+
+            DEBUG(INDI::Logger::DBG_SESSION, "InitProperties");
+        // Add alignment properties
+        InitAlignmentProperties(this);
+        // Force the alignment system to always be on
+        getSwitch("ALIGNMENT_SUBSYSTEM_ACTIVE")->sp[0].s = ISS_ON;
+
+
+
+    return r;
+}
+void SynscanMount::ISGetProperties (const char *dev)
+{
+    /* First we let our parent populate */
+    INDI::Telescope::ISGetProperties(dev);
+
+
+    return;
+}
+bool SynscanMount::ISNewNumber (const char *dev, const char *name, double values[], char *names[], int n)
+{
+    if(strcmp(dev,getDeviceName())==0)
+    {
+        // It is for us
+        ProcessAlignmentNumberProperties(this, name, values, names, n);
+    }
+    // Pass it up the chain
+    return INDI::Telescope::ISNewNumber(dev, name, values, names, n);
+}
+
+bool SynscanMount::ISNewSwitch (const char *dev, const char *name, ISState *states, char *names[], int n)
+{
+    if(strcmp(dev,getDeviceName())==0)
+    {
+        // It is for us
+        ProcessAlignmentSwitchProperties(this, name, states, names, n);
+    }
+    // Pass it up the chain
+    return INDI::Telescope::ISNewSwitch(dev, name, states, names, n);
+}
+
+bool SynscanMount::ISNewBLOB (const char *dev, const char *name, int sizes[], int blobsizes[], char *blobs[], char *formats[], char *names[], int n)
+{
+    if(strcmp(dev,getDeviceName())==0)
+    {
+        // It is for us
+        ProcessAlignmentBLOBProperties(this, name, sizes, blobsizes, blobs, formats, names, n);
+    }
+    // Pass it up the chain
+    return INDI::Telescope::ISNewBLOB(dev, name, sizes, blobsizes, blobs, formats, names, n);
+}
+
+bool SynscanMount::ISNewText (const char *dev, const char *name, char *texts[], char *names[], int n)
+{
+    if(strcmp(dev,getDeviceName())==0)
+    {
+        ProcessAlignmentTextProperties(this, name, texts, names, n);
+    }
+    // Pass it up the chain
+    return INDI::Telescope::ISNewText(dev, name, texts, names, n);
+}
+
+bool SynscanMount::updateProperties()
+{
+    INDI::Telescope::updateProperties();
+            DEBUG(INDI::Logger::DBG_SESSION, "Update Properties");
+
+    if (isConnected())
+    {
+
+
+    }
+    else
+    {
+
+    }
+
+    return true;
+}
+
 
 bool SynscanMount::AnalyzeHandset()
 {
@@ -109,11 +225,11 @@ bool SynscanMount::AnalyzeHandset()
 	rc=ReadLocation();
 	if(rc) {
 	    CanSetLocation=true;
-	    caps |= TELESCOPE_HAS_LOCATION;
+	    //caps |= TELESCOPE_HAS_LOCATION;
             rc=ReadTime();
-            if(rc) caps |= TELESCOPE_HAS_TIME;
+            //if(rc) caps |= TELESCOPE_HAS_TIME;
 	} else {
-	    CanSetLocation=false;
+	    //CanSetLocation=false;
         }
 
 	int tmp,tmp1,tmp2;
@@ -150,7 +266,7 @@ bool SynscanMount::AnalyzeHandset()
 	FirmwareVersion/=100;
 	FirmwareVersion+=tmp;
 	//fprintf(stderr,"FirmwareVersion %6.4f\n",FirmwareVersion);
-	IDMessage(getDeviceName(),"Handset Firmware Version %6.4f",FirmwareVersion);
+	IDMessage(getDeviceName(),"Handset Firmware Version %lf",FirmwareVersion);
 
 	SetTelescopeCapability(caps,SYNSCAN_SLEW_RATES);
 
@@ -165,6 +281,10 @@ bool SynscanMount::AnalyzeHandset()
             SetAxis1ParkDefault(0);
             SetAxis2ParkDefault(90);
         }
+
+    //SetApproximateMountAlignmentFromMountType(EQUATORIAL);
+    //SetApproximateMountAlignment(NORTH_CELESTIAL_POLE);
+
 
 	return r;
 }
@@ -218,10 +338,14 @@ bool SynscanMount::ReadScopeStatus()
 */
 
     if(FirstConnect) {
+	//fprintf(stderr,"sending fake radec\n");
+	//NewRaDec(0,0);
+	//return true;
 	//  the first time we come thru, we need to figure out a few things about our handset
         //  ie can it do date and time etc
 	AnalyzeHandset();
 	FirstConnect=false;
+	return true;
     } else {
 	//  on subsequent passes, we just need to read the time
         if(HasTime()) {
@@ -257,6 +381,28 @@ bool SynscanMount::ReadScopeStatus()
     }
     if(TrackState==SCOPE_PARKING)
     {
+	//IDMessage(getDeviceName(),"Firmware %lf",FirmwareVersion);
+	if(FirmwareVersion == 4.103500) {
+	    //  With this firmware the correct way
+	    //  is to check the slewing flat
+            memset(str,0,3);
+            tty_write(PortFD,"L",1, &bytesWritten);
+            numread=tty_read(PortFD,str,2,3, &bytesRead);
+            if(str[0]!=48)
+            {
+                //  Nothing to do here
+            } else {
+		if(NumPark++ < 2) {
+		    Park();
+                } else {
+		    TrackState=SCOPE_PARKED;
+	 	    //IDMessage(getDeviceName(),"Telescope is Parked");
+		    SetParked(true);
+		}
+            }
+
+	} else {
+	
         //  ok, lets try read where we are
         //  and see if we have reached the park position
 	//  newer firmware versions dont read it back the same way
@@ -265,24 +411,34 @@ bool SynscanMount::ReadScopeStatus()
         memset(str,0,20);
         tty_write(PortFD,"z",1, &bytesWritten);
         numread=tty_read(PortFD,str,18,2, &bytesRead);
-        //IDLog("PARK READ %s\n",str);
+
+        //IDMessage(getDeviceName(),"Park Read %s %d",str,StopCount);
 
         if(strncmp((char *)str,LastParkRead,18)==0)
         {
 	    //  We find that often after it stops from park 
             //  it's off the park position by a small amount
             //  issuing another park command gets a small movement and then
-	    if(NumPark++ < 2) {
-		Park();
-            } else {
-                TrackState=SCOPE_PARKED;
-                //ParkSP.s=IPS_OK;
-                //IDSetSwitch(&ParkSP,NULL);
-                IDMessage(getDeviceName(),"Telescope is Parked.");
-                SetParked(true);
+	    if(++StopCount > 2) {
+	        if(NumPark++ < 2) {
+		    StopCount=0;
+		    //IDMessage(getDeviceName(),"Sending park again");
+		    Park();
+                } else {
+                    TrackState=SCOPE_PARKED;
+                    //ParkSP.s=IPS_OK;
+                    //IDSetSwitch(&ParkSP,NULL);
+                    //IDMessage(getDeviceName(),"Telescope is Parked.");
+                    SetParked(true);
+                }
+   	    } else {
+		//StopCount=0;
             }
-        }
+        } else {
+	    StopCount=0;
+	}
 	strcpy(LastParkRead,str);
+	}
 
     }
 
@@ -298,6 +454,7 @@ bool SynscanMount::ReadScopeStatus()
 
     if (isDebug())
         IDLog("Bytes read is (%s)\n", str);
+
     // bytes read is as expected
     //sscanf((char *)str,"%x",&n1);
     //sscanf((char *)&str[9],"%x",&n2);
@@ -307,7 +464,47 @@ bool SynscanMount::ReadScopeStatus()
 
     ra=(double)n1/0x100000000*24.0;
     dec=(double)n2/0x100000000*360.0;
-    NewRaDec(ra,dec);
+    //  we need uncorrected data to be saved
+    //  to use in a sync
+    currentRA=ra;
+    currentDEC=dec;
+
+
+    //  Before we pass this back to a client
+    //  run it thru the alignment matrix to correct the data
+    ln_equ_posn eq;
+
+    eq=TelescopeToSky(ra,dec);
+    //  Now feed the rest of the system with corrected data
+    NewRaDec(eq.ra,eq.dec);
+
+/*
+
+    if(GetAlignmentDatabase().size() > 1) {
+
+    	double RightAscension,Declination;
+    	ln_equ_posn eq;
+    	TelescopeDirectionVector TDV;
+
+    	eq.ra=ra*360/24;
+    	eq.dec=dec;
+
+    	TDV=TelescopeDirectionVectorFromEquatorialCoordinates(eq);
+    	if (TransformTelescopeToCelestial( TDV, RightAscension, Declination)) {
+	    if(RightAscension < 0) RightAscension+=24.0;
+	    //fprintf(stderr,"new values %6.4f %6.4f %6.4f  %6.4f Deltas %3.0lf %3.0lf\n",ra,dec,RightAscension,Declination,(ra-RightAscension)*60,(dec-Declination)*60);
+
+    	} else {
+	    //fprintf(stderr,"Conversion failed\n");
+            RightAscension=ra;
+            Declination=dec;       
+    	}
+
+    	NewRaDec(RightAscension,Declination);
+    } else {
+    	NewRaDec(ra,dec);
+    }
+*/
     return true;
 }
 
@@ -316,6 +513,17 @@ bool SynscanMount::Goto(double ra,double dec)
     char str[20];
     int n1,n2;
     int numread, bytesWritten, bytesRead;
+    ln_equ_posn eq;
+    double RightAscension,Declination;
+
+//fprintf(stderr,"Enter Goto  %4.4lf %4.4lf\n",ra,dec);
+    DEBUGF(INDI::Logger::DBG_SESSION,"Enter Goto %g %g",ra,dec);
+
+    eq=SkyToTelescope(ra,dec);
+    RightAscension=eq.ra;
+    Declination=eq.dec;
+    DEBUGF(INDI::Logger::DBG_SESSION,"Corrected Goto %g %g",RightAscension,Declination);
+
 
     //  not fleshed in yet
     tty_write(PortFD,"Ka",2, &bytesWritten);  //  test for an echo
@@ -327,8 +535,8 @@ bool SynscanMount::Goto(double ra,double dec)
     }
     //  Ok, mount is alive and well
     //  so, lets format up a goto command
-    n1=ra*0x1000000/24;
-    n2=dec*0x1000000/360;
+    n1=RightAscension*0x1000000/24;
+    n2=Declination*0x1000000/360;
     n1=n1<<8;
     n2=n2<<8;
     sprintf((char *)str,"r%08X,%08X",n1,n2);
@@ -344,6 +552,7 @@ bool SynscanMount::Goto(double ra,double dec)
 
     return true;
 }
+
 
 bool SynscanMount::Park()
 {
@@ -381,7 +590,8 @@ bool SynscanMount::Park()
     }
 
     TrackState=SCOPE_PARKING;
-    if(NumPark==0) IDMessage(getDeviceName(),"Parking Telescope...");
+    if(NumPark==0) IDMessage(getDeviceName(),"Parking Mount...");
+    StopCount=0;
     return true;
 }
 
@@ -699,17 +909,21 @@ bool SynscanMount::updateLocation(double latitude, double longitude, double elev
     ln_lnlat_posn p1;
     lnh_lnlat_posn p2;
 
+//  call the alignment subsystem with our location
+    UpdateLocation(latitude, longitude, elevation);
+
+    LocationN[LOCATION_LATITUDE].value=latitude;
+    LocationN[LOCATION_LONGITUDE].value=longitude;
+    IDSetNumber(&LocationNP, NULL);
+
     if(!CanSetLocation) {
 
-            LocationN[LOCATION_LATITUDE].value=latitude;
-            LocationN[LOCATION_LONGITUDE].value=longitude;
-            IDSetNumber(&LocationNP, NULL);
 	    return true;
 
     } else {
     
 
-    //fprintf(stderr,"Enter Update Location %4.6lf  %4.6lf\n",latitude,longitude);
+    DEBUGF(INDI::Logger::DBG_SESSION,"Enter Update Location %4.6lf  %4.6lf\n",latitude,longitude);
     if(longitude > 180) {
         p1.lng=360.0-longitude;
         IsWest=true;
@@ -719,14 +933,11 @@ bool SynscanMount::updateLocation(double latitude, double longitude, double elev
     p1.lat=latitude;
     ln_lnlat_to_hlnlat(&p1,&p2);
 
-//fprintf(stderr,"Lat seconds %4.3lf\n",p2.lat.seconds);
-
     str[0]='W';
     str[1]=p2.lat.degrees;
     str[2]=p2.lat.minutes;
     tmp=p2.lat.seconds+0.5;
     s=(int)tmp; //  put in an int that's rounded
-//fprintf(stderr,"Sending %d\n",s);
     str[3]=s;
     if(p2.lat.neg==0) str[4]=0;
     else str[4]=1;
@@ -749,9 +960,197 @@ bool SynscanMount::updateLocation(double latitude, double longitude, double elev
     //  want to read it on the next cycle, so we update the fields in the client
     ReadLatLong=true;
 
-
     return true;
     }
-}        
+}
+
+
+bool SynscanMount::Sync(double ra, double dec)
+{
+    ln_equ_posn eq;
+    AlignmentDatabaseEntry NewEntry;
+    ln_lnlat_posn here;
+    ln_hrz_posn altaz;
+    double lst,lha;
+
+    DEBUGF(INDI::Logger::DBG_SESSION,"Sync %g %g -> %g %g\n",currentRA,currentDEC,ra,dec);
+
+
+    //  this is where we think we are pointed now
+    //  and we need to set a sync point in the alignment database
+
+    /*
+    //  working entirely in eq co-ordinates, this is all we need to do here
+    //  we need these numbers in degrees
+    eq.ra=currentRA*360.0/24.0;	//  this is wanted in degrees, not hours
+    eq.dec=currentDEC;
+    NewEntry.TelescopeDirection=TelescopeDirectionVectorFromEquatorialCoordinates(eq);
+
+    //  if working in alt/az co-ordinates, we need to do this as well
+    here.lat=LocationN[LOCATION_LATITUDE].value;
+    here.lng=LocationN[LOCATION_LONGITUDE].value;
+    ln_get_hrz_from_equ(&eq,&here,ln_get_julian_from_sys(),&altaz);
+    NewEntry.TelescopeDirection=TelescopeDirectionVectorFromAltitudeAzimuth(altaz);
+    */
+    
+    //  if we are working in lha/dec co-ordinates, we need to do these steps
+    //  the steps above dont matter
+    lst=get_local_sideral_time(LocationN[LOCATION_LONGITUDE].value);
+    lha=get_local_hour_angle(lst,currentRA);
+    //  convert lha to degrees
+    lha=lha*360.0/24.0;
+    eq.ra=lha;
+    eq.dec=currentDEC;
+    NewEntry.TelescopeDirection=TelescopeDirectionVectorFromLocalHourAngleDeclination(eq);
+
+    //  Flesh out the rest of the information for this sync point
+    NewEntry.ObservationJulianDate = ln_get_julian_from_sys();
+    NewEntry.RightAscension=ra;
+    NewEntry.Declination=dec;
+    NewEntry.PrivateDataSize=0;
+    if (!CheckForDuplicateSyncPoint(NewEntry))
+    {
+        GetAlignmentDatabase().push_back(NewEntry);
+        // Tell the client about size change
+        UpdateSize();
+        // Tell the math plugin to reinitialise
+        Initialise(this);
+        return true;
+    }
+    return false;
+}
+
+        
+ln_equ_posn SynscanMount::TelescopeToSky(double ra,double dec)
+{
+    double RightAscension,Declination;
+    ln_equ_posn eq;
+
+    if(GetAlignmentDatabase().size() > 1) {
+
+    	TelescopeDirectionVector TDV;
+
+        /*  Use this if we ar converting eq co-ords
+	//  but it's broken for now
+    	eq.ra=ra*360/24;
+    	eq.dec=dec;
+    	TDV=TelescopeDirectionVectorFromEquatorialCoordinates(eq);
+	*/
+
+	/* This code does a conversion from ra/dec to alt/az
+	// before calling the alignment stuff
+        ln_lnlat_posn here;
+    	ln_hrz_posn altaz;
+
+    	here.lat=LocationN[LOCATION_LATITUDE].value;
+    	here.lng=LocationN[LOCATION_LONGITUDE].value;
+    	eq.ra=ra*360.0/24.0;	//  this is wanted in degrees, not hours
+    	eq.dec=dec;
+    	ln_get_hrz_from_equ(&eq,&here,ln_get_julian_from_sys(),&altaz);
+    	TDV=TelescopeDirectionVectorFromAltitudeAzimuth(altaz);
+*/	
+
+	/*  and here we convert from ra/dec to hour angle / dec before calling alignment stuff */
+    	double lha,lst;
+	lst=get_local_sideral_time(LocationN[LOCATION_LONGITUDE].value);
+	lha=get_local_hour_angle(lst,ra);
+	//  convert lha to degrees
+	lha=lha*360/24;
+	eq.ra=lha;
+	eq.dec=dec;
+    	TDV=TelescopeDirectionVectorFromLocalHourAngleDeclination(eq);
+      
+	
+    	if (TransformTelescopeToCelestial( TDV, RightAscension, Declination)) {
+	    //  if we get here, the conversion was successful
+	    //fprintf(stderr,"new values %6.4f %6.4f %6.4f  %6.4f Deltas %3.0lf %3.0lf\n",ra,dec,RightAscension,Declination,(ra-RightAscension)*60,(dec-Declination)*60);
+    	} else {
+	    //if the conversion failed, return raw data
+            RightAscension=ra;
+            Declination=dec;       
+    	}
+
+    } else {
+	//  With less than 2 align points
+	// Just return raw data
+    	RightAscension=ra;
+	Declination=dec;
+    }
+
+    eq.ra=RightAscension;
+    eq.dec=Declination;
+    return eq;
+}
+
+ln_equ_posn SynscanMount::SkyToTelescope(double ra,double dec)
+{
+
+    ln_equ_posn eq;
+    ln_lnlat_posn here;
+    ln_hrz_posn altaz;
+    TelescopeDirectionVector TDV;
+    double RightAscension,Declination;
+
+/*
+*/
+
+
+    if(GetAlignmentDatabase().size() > 1) {
+	//  if the alignment system has been turned off
+	//  this transformation will fail, and we fall thru
+	//  to using raw co-ordinates from the mount
+	if(TransformCelestialToTelescope(ra, dec, 0.0, TDV)) {
+
+            /*  Initial attemp, using RA/DEC co-ordinates talking to alignment system
+    	    EquatorialCoordinatesFromTelescopeDirectionVector(TDV,eq);
+	    RightAscension=eq.ra*24.0/360;
+	    Declination=eq.dec;
+	    if(RightAscension < 0) RightAscension+=24.0;
+    	    DEBUGF(INDI::Logger::DBG_SESSION,"Transformed Co-ordinates %g %g\n",RightAscension,Declination);
+            */
+
+
+	    //  nasty altaz kludge, use al/az co-ordinates to talk to alignment system
+	    /*
+            eq.ra=ra*360/24;
+            eq.dec=dec;
+            here.lat=LocationN[LOCATION_LATITUDE].value;
+            here.lng=LocationN[LOCATION_LONGITUDE].value;
+            ln_get_hrz_from_equ(&eq,&here,ln_get_julian_from_sys(),&altaz);
+	    AltitudeAzimuthFromTelescopeDirectionVector(TDV,altaz);
+	    //  now convert the resulting altaz into radec
+    	    ln_get_equ_from_hrz(&altaz,&here,ln_get_julian_from_sys(),&eq);
+	    RightAscension=eq.ra*24.0/360.0;
+	    Declination=eq.dec;
+            */
+            
+
+	    /* now lets convert from telescope to lha/dec */
+	    double lst;
+	    LocalHourAngleDeclinationFromTelescopeDirectionVector(TDV,eq);
+	    //  and now we have to convert from lha back to RA
+	    lst=get_local_sideral_time(LocationN[LOCATION_LONGITUDE].value);
+	    eq.ra=eq.ra*24/360;
+	    RightAscension=lst-eq.ra;
+	    RightAscension=range24(RightAscension);
+	    Declination=eq.dec;
+	    
+
+        } else {
+            DEBUGF(INDI::Logger::DBG_SESSION,"Transform failed, using raw co-ordinates %g %g\n",ra,dec);
+	    RightAscension=ra;
+	    Declination=dec;
+        }
+    } else {
+    	RightAscension=ra;
+    	Declination=dec;
+    }
+
+    eq.ra=RightAscension;
+    eq.dec=Declination;
+    //eq.ra=ra;
+    //eq.dec=dec;
+    return eq;
+}
 
 

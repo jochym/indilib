@@ -25,11 +25,10 @@
 #include <unistd.h>
 #include <sys/time.h>
 
-#ifdef OSX_EMBEDED_MODE
-#include "stream_recorder.h"
-#else
+#ifndef OSX_EMBEDED_MODE
 #include <stream_recorder.h>
 #endif
+
 #include <indidevapi.h>
 
 
@@ -268,7 +267,9 @@ bool ASICCD::initProperties()
   if (m_camInfo->IsColorCam)
       cap |= CCD_HAS_BAYER;
 
+  #ifndef OSX_EMBEDED_MODE
   cap |= CCD_HAS_STREAMING;
+  #endif
 
   SetCCDCapability(cap);
 
@@ -289,7 +290,16 @@ bool ASICCD::updateProperties()
   if (isConnected())
   {    
     if (HasCooler())
+    {
         defineNumber(&CoolerNP);
+        defineSwitch(&CoolerSP);
+    }
+    // Even if there is no cooler, we define temperature property as READ ONLY
+    else
+    {
+        TemperatureNP.p = IP_RO;
+        defineNumber(&TemperatureNP);
+    }
 
     // Let's get parameters now from CCD
     setupParams();
@@ -308,7 +318,12 @@ bool ASICCD::updateProperties()
   {
 
     if (HasCooler())
+    {
         deleteProperty(CoolerNP.name);
+        deleteProperty(CoolerSP.name);
+    }
+    else
+        deleteProperty(TemperatureNP.name);
 
     if (ControlNP.nnp > 0)
         deleteProperty(ControlNP.name);
@@ -343,8 +358,10 @@ bool ASICCD::Connect()
 
   TemperatureUpdateCounter = 0;
 
+#ifndef OSX_EMBEDED_MODE
   pthread_create( &primary_thread, NULL, &streamVideoHelper, this);
-
+#endif
+  
   /* Success! */
   DEBUG(INDI::Logger::DBG_SESSION,  "CCD is online. Retrieving basic data.");
 
@@ -488,8 +505,8 @@ bool ASICCD::setupParams()
   //nbuf += 512;    //  leave a little extra at the end
   PrimaryCCD.setFrameBufferSize(nbuf);
 
-  if (HasCooler())
-  {
+  //if (HasCooler())
+  //{
       long pValue = 0;
       ASI_BOOL isAuto= ASI_FALSE;
 
@@ -500,14 +517,16 @@ bool ASICCD::setupParams()
 
       DEBUGF(INDI::Logger::DBG_SESSION,  "The CCD Temperature is %f", TemperatureN[0].value);
       IDSetNumber(&TemperatureNP, NULL);
-  }
+  //}
 
   ASIStopVideoCapture(m_camInfo->CameraID);
 
   ASISetROIFormat(m_camInfo->CameraID, m_camInfo->MaxWidth, m_camInfo->MaxHeight, 1, imgType);
 
+  #ifndef OSX_EMBEDED_MODE
   updateRecorderFormat();
   streamer->setRecorderSize(w,h);
+  #endif
 
   return true;
 
@@ -618,8 +637,25 @@ bool ASICCD::ISNewSwitch (const char *dev, const char *name, ISState *states, ch
 
         }
 
+        /* Cooler */
+       if (!strcmp (name, CoolerSP.name))
+       {
+         if (IUUpdateSwitch(&CoolerSP, states, names, n) < 0)
+             return false;
+
+         bool rc=false;
+
+         if (CoolerS[0].s == ISS_ON)
+           activateCooler(true);
+         else
+           activateCooler(false);
+
+         return true;
+       }
+
         if (!strcmp(name, VideoFormatSP.name))
         {
+            #ifndef OSX_EMBEDED_MODE
             if (streamer->isBusy())
             {
                 VideoFormatSP.s = IPS_ALERT;
@@ -627,6 +663,7 @@ bool ASICCD::ISNewSwitch (const char *dev, const char *name, ISState *states, ch
                 IDSetSwitch(&VideoFormatSP, NULL);
                 return true;
             }
+            #endif
 
             IUUpdateSwitch(&VideoFormatSP, states, names, n);
 
@@ -657,6 +694,7 @@ bool ASICCD::ISNewSwitch (const char *dev, const char *name, ISState *states, ch
    return INDI::CCD::ISNewSwitch(dev,name,states,names,n);
 }
 
+#ifndef OSX_EMBEDED_MODE
 bool ASICCD::StartStreaming()
 {
     ASI_IMG_TYPE type = getImageType();
@@ -692,7 +730,9 @@ bool ASICCD::StartStreaming()
 
     return true;
 }
+#endif
 
+#ifndef OSX_EMBEDED_MODE
 bool ASICCD::StopStreaming()
 {
     pthread_mutex_lock(&condMutex);
@@ -703,6 +743,7 @@ bool ASICCD::StopStreaming()
 
     return true;
 }
+#endif
 
 int ASICCD::SetTemperature(double temperature)
 {
@@ -710,13 +751,39 @@ int ASICCD::SetTemperature(double temperature)
     if (fabs(temperature - TemperatureN[0].value) < TEMP_THRESHOLD)
         return 1;
 
+    if (activateCooler(true) == false)
+    {
+        DEBUG(INDI::Logger::DBG_ERROR, "Failed to activate cooler!");
+        return -1;
+    }
+
+    if (ASISetControlValue(m_camInfo->CameraID, ASI_TARGET_TEMP, temperature, ASI_TRUE) != ASI_SUCCESS)
+    {
+        DEBUG(INDI::Logger::DBG_ERROR, "Failed to set temperature!");
+        return -1;
+    }
+
     // Otherwise, we set the temperature request and we update the status in TimerHit() function.
     TemperatureRequest = temperature;
     DEBUGF(INDI::Logger::DBG_SESSION, "Setting CCD temperature to %+06.2f C", temperature);
     return 0;
 }
 
+bool ASICCD::activateCooler(bool enable)
+{
+    bool rc = (ASISetControlValue(m_camInfo->CameraID, ASI_COOLER_ON, enable ? ASI_TRUE : ASI_FALSE, ASI_FALSE) == ASI_SUCCESS);
+    if (rc == false)
+        CoolerSP.s = IPS_ALERT;
+    else
+    {
+        CoolerS[0].s = enable ? ISS_ON : ISS_OFF;
+        CoolerS[1].s = enable ? ISS_OFF: ISS_ON;
+        CoolerSP.s = IPS_BUSY;
+    }
+    IDSetSwitch(&CoolerSP, NULL);
 
+    return rc;
+}
 
 bool ASICCD::StartExposure(float duration)
 {
@@ -792,19 +859,21 @@ bool ASICCD::UpdateCCDFrame(int x, int y, int w, int h)
     return false;
   }
 
-  if ( (errCode = ASISetStartPos(m_camInfo->CameraID, x_1, y_1)) != ASI_SUCCESS)
-  {
-      DEBUGF(INDI::Logger::DBG_ERROR, "ASISetStartPos (%d,%d) error (%d)", x_1, y_1, errCode);
-      return false;
-  }
-
   if ( (errCode = ASISetROIFormat(m_camInfo->CameraID, bin_width, bin_height, PrimaryCCD.getBinX(), getImageType())) != ASI_SUCCESS)
   {
       DEBUGF(INDI::Logger::DBG_ERROR, "ASISetROIFormat (%dx%d @ %d) error (%d)", bin_width, bin_height, PrimaryCCD.getBinX(), errCode);
       return false;
   }
 
+  if ( (errCode = ASISetStartPos(m_camInfo->CameraID, x_1, y_1)) != ASI_SUCCESS)
+  {
+      DEBUGF(INDI::Logger::DBG_ERROR, "ASISetStartPos (%d,%d) error (%d)", x_1, y_1, errCode);
+      return false;
+  } 
+
+  #ifndef OSX_EMBEDED_MODE
   streamer->setRecorderSize(bin_width, bin_height);
+  #endif
 
   // Set UNBINNED coords
   PrimaryCCD.setFrame(x, y, w, h);
@@ -1022,12 +1091,13 @@ void ASICCD::TimerHit()
     }
   }
 
-  if (HasCooler() && TemperatureUpdateCounter++ > TEMPERATURE_UPDATE_FREQ)
+  if (/*HasCooler() && */TemperatureUpdateCounter++ > TEMPERATURE_UPDATE_FREQ)
   {
       TemperatureUpdateCounter = 0;
 
       long ASIControlValue=0;
       ASI_BOOL ASIControlAuto;
+      double currentTemperature=TemperatureN[0].value;
 
       ASI_ERROR_CODE errCode = ASIGetControlValue(m_camInfo->CameraID, ASI_TEMPERATURE, &ASIControlValue, &ASIControlAuto);
       if (errCode != ASI_SUCCESS)
@@ -1044,8 +1114,11 @@ void ASICCD::TimerHit()
       {
       case IPS_IDLE:
       case IPS_OK:
-      case IPS_ALERT:
+          if (fabs(currentTemperature - TemperatureN[0].value) > TEMP_THRESHOLD/10.0)
             IDSetNumber(&TemperatureNP, NULL);
+          break;
+
+      case IPS_ALERT:
         break;
 
       case IPS_BUSY:
@@ -1057,22 +1130,25 @@ void ASICCD::TimerHit()
         break;
       }
 
-      errCode = ASIGetControlValue(m_camInfo->CameraID, ASI_COOLER_POWER_PERC, &ASIControlValue, &ASIControlAuto);
-      if (errCode != ASI_SUCCESS)
+      if (HasCooler())
       {
-          DEBUGF(INDI::Logger::DBG_ERROR, "ASIGetControlValue ASI_COOLER_POWER_PERC error (%d)", errCode);
-          CoolerNP.s = IPS_ALERT;
-      }
-      else
-      {
-          CoolerN[0].value = ASIControlValue;
-          if (ASIControlValue > 0)
-              CoolerNP.s = IPS_BUSY;
+          errCode = ASIGetControlValue(m_camInfo->CameraID, ASI_COOLER_POWER_PERC, &ASIControlValue, &ASIControlAuto);
+          if (errCode != ASI_SUCCESS)
+          {
+              DEBUGF(INDI::Logger::DBG_ERROR, "ASIGetControlValue ASI_COOLER_POWER_PERC error (%d)", errCode);
+              CoolerNP.s = IPS_ALERT;
+          }
           else
-              CoolerNP.s = IPS_IDLE;
-      }
+          {
+              CoolerN[0].value = ASIControlValue;
+              if (ASIControlValue > 0)
+                  CoolerNP.s = IPS_BUSY;
+              else
+                  CoolerNP.s = IPS_IDLE;
+          }
 
-      IDSetNumber(&CoolerNP, NULL);
+          IDSetNumber(&CoolerNP, NULL);
+      }
   }
 
   if(InWEPulse)
@@ -1387,6 +1463,7 @@ void ASICCD::updateControls()
 void ASICCD::updateRecorderFormat()
 {
 
+    #ifndef OSX_EMBEDED_MODE
     switch (getImageType())
     {
       case ASI_IMG_Y8:
@@ -1418,9 +1495,11 @@ void ASICCD::updateRecorderFormat()
         break;
 
     }
+    #endif
 
 }
 
+#ifndef OSX_EMBEDED_MODE
 void * ASICCD::streamVideoHelper(void* context)
 {
     return ((ASICCD*)context)->streamVideo();
@@ -1462,3 +1541,5 @@ void* ASICCD::streamVideo()
   pthread_mutex_unlock(&condMutex);
   return 0;
 }
+#endif
+

@@ -49,6 +49,8 @@ INDI::Dome::Dome()
     parkDataType = PARK_NONE;
     Parkdatafile= "~/.indi/ParkData.xml";
     IsParked=false;
+    HaveLatLong=false;
+    HaveRaDec=false;
 }
 
 INDI::Dome::~Dome()
@@ -106,7 +108,7 @@ bool INDI::Dome::initProperties()
 
     IUFillSwitch(&DomeMotionS[0],"DOME_CW","Dome CW",ISS_OFF);
     IUFillSwitch(&DomeMotionS[1],"DOME_CCW","Dome CCW",ISS_OFF);
-    IUFillSwitchVector(&DomeMotionSP,DomeMotionS,2,getDeviceName(),"DOME_MOTION","Direction",MAIN_CONTROL_TAB,IP_RW,ISR_ATMOST1,60,IPS_OK);
+    IUFillSwitchVector(&DomeMotionSP,DomeMotionS,2,getDeviceName(),"DOME_MOTION","Motion",MAIN_CONTROL_TAB,IP_RW,ISR_ATMOST1,60,IPS_OK);
 
     // Driver can define those to clients if there is support
     IUFillNumber(&DomeAbsPosN[0],"DOME_ABSOLUTE_POSITION","Degrees","%6.2f",0.0,360.0,1.0,0.0);
@@ -555,6 +557,7 @@ bool INDI::Dome::ISNewText (const char *dev, const char *name, char *texts[], ch
             IDSetText(&ActiveDeviceTP,NULL);
 
             IDSnoopDevice(ActiveDeviceT[0].text,"EQUATORIAL_EOD_COORD");
+            IDSnoopDevice(ActiveDeviceT[0].text,"TARGET_EOD_COORD");
             IDSnoopDevice(ActiveDeviceT[0].text,"GEOGRAPHIC_COORD");            
             IDSnoopDevice(ActiveDeviceT[1].text,"WEATHER_STATUS");
 
@@ -572,14 +575,44 @@ bool INDI::Dome::ISSnoopDevice (XMLEle *root)
     XMLEle *ep=NULL;
     const char *propName = findXMLAttValu(root, "name");
 
+    // Check TARGET
+    if (!strcmp("TARGET_EOD_COORD", propName))
+    {
+        int rc_ra=-1, rc_de=-1;
+        double ra=0, de=0;
+        
+        for (ep = nextXMLEle(root, 1) ; ep != NULL ; ep = nextXMLEle(root, 0))
+        {
+            const char *elemName = findXMLAttValu(ep, "name");
+
+            DEBUGF(INDI::Logger::DBG_DEBUG, "Snooped Target RA-DEC: %s", pcdataXMLEle(ep));
+            if (!strcmp(elemName, "RA"))                            
+                rc_ra = f_scansexa(pcdataXMLEle(ep), &ra);
+            else if (!strcmp(elemName, "DEC"))
+                rc_de = f_scansexa(pcdataXMLEle(ep), &de);
+        }
+	//  Dont start moving the dome till the mount has initialized all the variables
+	if(HaveRaDec) {
+       	    if (rc_ra==0 && rc_de==0)
+            {
+		//  everything parsed ok, so lets start the dome to moving
+		//  and see if we can get there at the same time as the mount
+                mountEquatorialCoords.ra = ra*15.0;
+                mountEquatorialCoords.dec = de;
+                DEBUGF(INDI::Logger::DBG_DEBUG, "Calling Update mount to anticipate goto target: %g - DEC: %g", mountEquatorialCoords.ra, mountEquatorialCoords.dec);
+                UpdateMountCoords();
+           }
+	}
+
+
+        return true;
+    }
     // Check EOD
     if (!strcmp("EQUATORIAL_EOD_COORD", propName))
     {
         int rc_ra=-1, rc_de=-1;
         double ra=0, de=0;
         
-        
-        DEBUG(INDI::Logger::DBG_DEBUG, "Snooped RA-DEC");
         for (ep = nextXMLEle(root, 1) ; ep != NULL ; ep = nextXMLEle(root, 0))
         {
             const char *elemName = findXMLAttValu(ep, "name");
@@ -606,6 +639,9 @@ bool INDI::Dome::ISSnoopDevice (XMLEle *root)
             prev_ra  = mountEquatorialCoords.ra;
             prev_dec = mountEquatorialCoords.dec;
             DEBUGF(INDI::Logger::DBG_DEBUG, "Snooped RA: %g - DEC: %g", mountEquatorialCoords.ra, mountEquatorialCoords.dec);
+	    //  a mount still intializing will emit 0 and 0 on the first go
+            //  we dont want to process 0/0
+	    if((mountEquatorialCoords.ra != 0)||(mountEquatorialCoords.dec != 0)) HaveRaDec=true;
         }
         // else mount stable, i.e. tracking, so let's update mount coords and check if we need to move
         else if (mountState == IPS_OK || mountState == IPS_IDLE)
@@ -627,6 +663,7 @@ bool INDI::Dome::ISSnoopDevice (XMLEle *root)
                 if (indiLong > 180)
                     indiLong -= 360;
                 observer.lng = indiLong;
+                HaveLatLong=true;
             }
             else if (!strcmp(elemName, "LAT"))
                 f_scansexa(pcdataXMLEle(ep), &(observer.lat));
@@ -672,10 +709,10 @@ bool INDI::Dome::saveConfigItems(FILE *fp)
     IUSaveConfigText(fp, &ActiveDeviceTP);
     IUSaveConfigText(fp, &PortTP);
     IUSaveConfigNumber(fp, &PresetNP);
-    IUSaveConfigSwitch(fp, &DomeAutoSyncSP);
     IUSaveConfigNumber(fp, &DomeParamNP);
     IUSaveConfigNumber(fp, &DomeMeasurementsNP);
     IUSaveConfigSwitch(fp, &AutoParkSP);
+    IUSaveConfigSwitch(fp, &DomeAutoSyncSP);
 
     controller->saveConfigItems(fp);
 
@@ -733,47 +770,73 @@ void INDI::Dome::setDomeState(const INDI::Dome::DomeState &value)
 {
     switch (value)
     {
-         case DOME_IDLE:
-            if (DomeMotionSP.s == IPS_BUSY)
-            {
-                IUResetSwitch(&DomeMotionSP);
-                DomeMotionSP.s = IPS_IDLE;
-                IDSetSwitch(&DomeMotionSP, NULL);
-            }
-            if (DomeAbsPosNP.s == IPS_BUSY)
-            {
-                DomeAbsPosNP.s = IPS_IDLE;
-                IDSetNumber(&DomeAbsPosNP, NULL);
-            }
-            if (DomeRelPosNP.s == IPS_BUSY)
-            {
-                DomeRelPosNP.s = IPS_IDLE;
-                IDSetNumber(&DomeRelPosNP, NULL);
-            }
-            break;
+    case DOME_IDLE:
+        if (DomeMotionSP.s == IPS_BUSY)
+        {
+            IUResetSwitch(&DomeMotionSP);
+            DomeMotionSP.s = IPS_IDLE;
+            IDSetSwitch(&DomeMotionSP, NULL);
+        }
+        if (DomeAbsPosNP.s == IPS_BUSY)
+        {
+            DomeAbsPosNP.s = IPS_IDLE;
+            IDSetNumber(&DomeAbsPosNP, NULL);
+        }
+        if (DomeRelPosNP.s == IPS_BUSY)
+        {
+            DomeRelPosNP.s = IPS_IDLE;
+            IDSetNumber(&DomeRelPosNP, NULL);
+        }
+        break;
 
-        case DOME_PARKED:
-            IUResetSwitch(&ParkSP);
-            ParkSP.s = IPS_OK;
-            ParkS[0].s = ISS_ON;
-            IDSetSwitch(&ParkSP, NULL);
-            IsParked = true;
-            break;
+    case DOME_SYNCED:
+        if (DomeMotionSP.s == IPS_BUSY)
+        {
+            IUResetSwitch(&DomeMotionSP);
+            DomeMotionSP.s = IPS_OK;
+            IDSetSwitch(&DomeMotionSP, NULL);
+        }
+        if (DomeAbsPosNP.s == IPS_BUSY)
+        {
+            DomeAbsPosNP.s = IPS_OK;
+            IDSetNumber(&DomeAbsPosNP, NULL);
+        }
+        if (DomeRelPosNP.s == IPS_BUSY)
+        {
+            DomeRelPosNP.s = IPS_OK;
+            IDSetNumber(&DomeRelPosNP, NULL);
+        }
+        break;
 
-         case DOME_PARKING:
-            IUResetSwitch(&ParkSP);
-            ParkSP.s = IPS_BUSY;
-            ParkS[0].s = ISS_ON;
-            IDSetSwitch(&ParkSP, NULL);
-            break;
+    case DOME_PARKED:
+        IUResetSwitch(&ParkSP);
+        ParkSP.s = IPS_OK;
+        ParkS[0].s = ISS_ON;
+        IDSetSwitch(&ParkSP, NULL);
+        IsParked = true;
+        break;
 
-        case DOME_UNPARKING:
-            IUResetSwitch(&ParkSP);
-            ParkSP.s = IPS_BUSY;
-            ParkS[1].s = ISS_ON;
-            IDSetSwitch(&ParkSP, NULL);
-            IsParked = false;
-            break;
+    case DOME_PARKING:
+        IUResetSwitch(&ParkSP);
+        ParkSP.s = IPS_BUSY;
+        ParkS[0].s = ISS_ON;
+        IDSetSwitch(&ParkSP, NULL);
+        break;
+
+    case DOME_UNPARKING:
+        IUResetSwitch(&ParkSP);
+        ParkSP.s = IPS_BUSY;
+        ParkS[1].s = ISS_ON;
+        IDSetSwitch(&ParkSP, NULL);
+        break;
+
+    case DOME_UNPARKED:
+        IUResetSwitch(&ParkSP);
+        ParkSP.s = IPS_OK;
+        ParkS[1].s = ISS_ON;
+        IDSetSwitch(&ParkSP, NULL);
+        IsParked = false;
+        break;
     }
 
     domeState = value;
@@ -979,11 +1042,16 @@ bool INDI::Dome::CheckHorizon(double HA, double dec, double lat)
     return false;
 }
 
+
 void INDI::Dome::UpdateMountCoords()
 {
     // If not initialized yet, return.
     if (mountEquatorialCoords.ra == -1)
         return;
+
+    //  Dont do this if we haven't had co-ordinates from the mount yet
+    if(!HaveLatLong) return;
+    if(!HaveRaDec) return;
 
     ln_get_hrz_from_equ(&mountEquatorialCoords, &observer, ln_get_julian_from_sys(), &mountHoriztonalCoords);
 
@@ -1019,8 +1087,12 @@ void INDI::Dome::UpdateAutoSync()
         }
 
         double targetAz, targetAlt, minAz, maxAz;
-        GetTargetAz(targetAz, targetAlt, minAz, maxAz);
-
+	bool res;
+        res=GetTargetAz(targetAz, targetAlt, minAz, maxAz);
+        if(!res) {
+        	DEBUGF(INDI::Logger::DBG_DEBUG, "GetTargetAz failed %g",targetAz);
+		return;
+	}
         DEBUGF(INDI::Logger::DBG_DEBUG, "Calculated target azimuth is %g. MinAz: %g, MaxAz: %g", targetAz, minAz, maxAz);
 
         if (fabs(targetAz - DomeAbsPosN[0].value) > DomeParamN[0].value)
@@ -1112,10 +1184,7 @@ void INDI::Dome::SetParked(bool isparked)
   }
   else
   {      
-      IUResetSwitch(&ParkSP);
-      ParkS[1].s = ISS_ON;
-      ParkSP.s = IPS_OK;
-      IDSetSwitch(&ParkSP, NULL);
+      setDomeState(DOME_UNPARKED);
       DEBUG( INDI::Logger::DBG_SESSION, "Dome is unparked.");
   }  
 
@@ -1417,6 +1486,12 @@ IPState INDI::Dome::MoveRel(double azDiff)
             DomeAbsPosNP.s=IPS_BUSY;
             IDSetNumber(&DomeAbsPosNP, NULL);
          }
+
+         DomeMotionSP.s = IPS_BUSY;
+         IUResetSwitch(&DomeMotionSP);
+         DomeMotionS[DOME_CW].s = (azDiff > 0) ? ISS_ON : ISS_OFF;
+         DomeMotionS[DOME_CCW].s = (azDiff < 0) ? ISS_ON : ISS_OFF;
+         IDSetSwitch(&DomeMotionSP, NULL);
          return IPS_BUSY;
     }
 
@@ -1465,6 +1540,7 @@ IPState INDI::Dome::MoveAbs(double az)
        DomeAbsPosN[0].value = az;
        DEBUGF(INDI::Logger::DBG_SESSION, "Dome moved to position %g degrees.", az);
        IDSetNumber(&DomeAbsPosNP, NULL);
+
        return IPS_OK;
     }
     else if (rc == IPS_BUSY)
@@ -1473,6 +1549,13 @@ IPState INDI::Dome::MoveAbs(double az)
        DomeAbsPosNP.s=IPS_BUSY;
        DEBUGF(INDI::Logger::DBG_SESSION, "Dome is moving to position %g degrees...", az);
        IDSetNumber(&DomeAbsPosNP, NULL);
+
+       DomeMotionSP.s = IPS_BUSY;
+       IUResetSwitch(&DomeMotionSP);
+       DomeMotionS[DOME_CW].s = (az > DomeAbsPosN[0].value) ? ISS_ON : ISS_OFF;
+       DomeMotionS[DOME_CCW].s = (az < DomeAbsPosN[0].value) ? ISS_ON : ISS_OFF;
+       IDSetSwitch(&DomeMotionSP, NULL);
+
        return IPS_BUSY;
     }
 

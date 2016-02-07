@@ -46,7 +46,7 @@ class CelestronGPS : public INDI::Telescope, public INDI::GuiderInterface
 
  virtual const char *getDefaultName();
  virtual bool Connect();
- virtual bool Connect(const char * port, uint16_t baud);
+ virtual bool Connect(const char * port, uint32_t baud);
  virtual bool Disconnect();
  virtual bool ReadScopeStatus();
  virtual void ISGetProperties(const char *dev);
@@ -62,7 +62,7 @@ protected:
 
  // Goto, Sync, and Motion
  bool Goto(double ra,double dec);
- bool GotoAzAlt(double az, double alt);
+ //bool GotoAzAlt(double az, double alt);
  bool Sync(double ra, double dec);
  virtual bool MoveNS(INDI_DIR_NS dir, TelescopeMotionCommand command);
  virtual bool MoveWE(INDI_DIR_WE dir, TelescopeMotionCommand command);
@@ -105,8 +105,8 @@ protected:
  IText   FirmwareT[5];
  ITextVectorProperty FirmwareTP;
 
- INumberVectorProperty HorizontalCoordsNP;
- INumber HorizontalCoordsN[2];
+ //INumberVectorProperty HorizontalCoordsNP;
+ //INumber HorizontalCoordsN[2];
 
  ISwitch TrackS[4];
  ISwitchVectorProperty TrackSP;

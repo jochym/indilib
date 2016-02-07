@@ -139,7 +139,7 @@ class INDI::Telescope : public INDI::DefaultDevice
           \return True if connection is successful, false otherwise
           \warning Do not call this function directly, it is called by INDI::Telescope Connect() function.
         */
-        virtual bool Connect(const char *port, uint16_t baud);
+        virtual bool Connect(const char *port, uint32_t baud);
 
 
         //Park
@@ -342,6 +342,11 @@ class INDI::Telescope : public INDI::DefaultDevice
         //  All telescopes should produce equatorial co-ordinates
         INumberVectorProperty EqNP;
         INumber EqN[2];
+
+	//  When a goto is issued, domes will snoop the target property
+	//  to start moving the dome when a telescope moves
+        INumberVectorProperty TargetNP;
+        INumber TargetN[2];
 
         // Abort motion
         ISwitchVectorProperty AbortSP;

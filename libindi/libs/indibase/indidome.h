@@ -104,9 +104,11 @@ class INDI::Dome : public INDI::DefaultDevice
     {
         DOME_IDLE,               /*!< Dome is idle */
         DOME_MOVING,             /*!< Dome is in motion */
+        DOME_SYNCED,             /*!< Dome is synced */
         DOME_PARKING,            /*!< Dome is parking */
         DOME_UNPARKING,          /*!< Dome is unparking */
         DOME_PARKED,             /*!< Dome is parked */
+        DOME_UNPARKED,           /*!< Dome is unparked */
     } DomeState;
 
     /** \typedef ShutterStatus
@@ -478,6 +480,8 @@ private:
 
         double Axis1ParkPosition;
         double Axis1DefaultParkPosition;
+	bool HaveLatLong;
+	bool HaveRaDec;
 
 
 };
