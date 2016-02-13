@@ -578,7 +578,8 @@ void NexStarEvo::TimerHit()
                 } else if (ISS_ON == IUFindSwitch(&CoordSP,"TRACK")->s)
                 {
                     // Precise Goto has finished. Start tracking.
-                    DEBUGF(DBG_NSEVO, "Goto finished start tracking TargetRA: %f TargetDEC: %f", CurrentTrackingTarget.ra, CurrentTrackingTarget.dec);
+                    DEBUGF(DBG_NSEVO, "Goto finished start tracking TargetRA: %f TargetDEC: %f", 
+                            CurrentTrackingTarget.ra, CurrentTrackingTarget.dec);
                     TrackState = SCOPE_TRACKING;
                     // Fall through to tracking case
                 }
