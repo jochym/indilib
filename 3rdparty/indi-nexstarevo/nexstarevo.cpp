@@ -565,6 +565,10 @@ void NexStarEvo::TimerHit()
     // Now handle the tracking state
     switch(TrackState)
     {
+        case SCOPE_PARKING:
+            if (!scope->slewing()) SetParked(true);
+            break;
+
         case SCOPE_SLEWING:
             if (not scope->slewing())
             {   
@@ -593,10 +597,6 @@ void NexStarEvo::TimerHit()
             }
             else
                 break; // The scope is still slewing
-
-        case SCOPE_PARKING:
-            if (!scope->slewing()) SetParked(true);
-            break;
 
 
         case SCOPE_TRACKING:
