@@ -64,7 +64,9 @@ since only master branch is uploaded back to the upstream SVN repository.
 - Get the source from github master branch (these should at least compile and 
   are kept consistent - in the nse branch you may encounter WIP state with 
   inconsistent state of the driver):
-    git clone https://github.com/jochym/indilib.git
+  ```
+  git clone https://github.com/jochym/indilib.git
+  ```
 - Create build directory at the same level as indilib directory created above.
 
 Compiling on any linux system
