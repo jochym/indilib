@@ -40,3 +40,35 @@ What does not work/is not implemented:
 - Serial link
 - HC interaction (tracking HC motor commands to function as joystick)
 - Probably many other things
+
+Install
+-------
+
+The driver is not included in the PPA distribution yet - due to its alpha/beta 
+state. So to use it you need to compile it from the source yourself.
+
+You can make a stand-alone compilation or build the debian packages for your 
+system. 
+
+Get the source
+==============
+
+You can get the source from the SVN repository of the system on sourceforge
+maintained by the INDI project (see the website of the project) or get it
+from the github mirror of the sourceforge repository maintained by the author 
+of this driver. Both will do fine. The github repository lets you track the 
+development of the driver more closely in the nse branch of the repository, 
+since only master branch is uploaded back to the upstream SVN repository.
+
+- Make some working directory and change into it.
+- Get the source from github master branch (these should at least compile and 
+  are kept consistent - in the nse branch you may encounter WIP state with 
+  inconsistent state of the driver):
+    git clone https://github.com/jochym/indilib.git
+- Create build directory at the same level as indilib directory created above.
+
+Compiling on any linux system
+=============================
+
+To compi
+
