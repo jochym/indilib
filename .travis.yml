@@ -4,7 +4,7 @@ os: linux
 
 branches:
     only:
-        - master
+        - travisci
 
 before_install:
     - echo Install dependencies
